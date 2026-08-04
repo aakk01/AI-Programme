@@ -236,7 +236,10 @@ async def import_xer(file: UploadFile = File(...), user_id: str = Depends(get_cu
         text = raw.decode("cp1252", errors="replace")
     try:
         parsed = xer_import.import_xer(text)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.exception("XER import failed")
         raise HTTPException(status_code=400, detail=f"Could not read XER file: {e}")
 
     activities = [Activity(**a).model_dump() for a in parsed["activities"]]

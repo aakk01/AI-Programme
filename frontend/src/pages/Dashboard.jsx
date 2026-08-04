@@ -104,32 +104,34 @@ export default function Dashboard() {
             </p>
             <h1 className="mt-2 text-4xl font-bold sm:text-5xl">Programmes</h1>
           </div>
-          <Button
-            data-testid="import-xer-button"
-            variant="outline"
-            className="rounded-sm"
-            onClick={() => fileRef.current?.click()}
-            disabled={importing}
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            {importing ? "Importing…" : "Import P6 XER"}
-          </Button>
-          <input
-            ref={fileRef}
-            data-testid="xer-file-input"
-            type="file"
-            accept=".xer,text/plain"
-            className="hidden"
-            onChange={(e) => importXer(e.target.files?.[0])}
-          />
-          <Button
-            data-testid="create-project-button"
-            className="rounded-sm"
-            onClick={() => navigate("/new")}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            New programme
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              data-testid="import-xer-button"
+              variant="outline"
+              className="rounded-sm"
+              onClick={() => fileRef.current?.click()}
+              disabled={importing}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              {importing ? "Importing…" : "Import P6 XER"}
+            </Button>
+            <input
+              ref={fileRef}
+              data-testid="xer-file-input"
+              type="file"
+              accept=".xer,text/plain"
+              className="hidden"
+              onChange={(e) => importXer(e.target.files?.[0])}
+            />
+            <Button
+              data-testid="create-project-button"
+              className="rounded-sm"
+              onClick={() => navigate("/new")}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              New programme
+            </Button>
+          </div>
         </div>
 
         {loading ? (

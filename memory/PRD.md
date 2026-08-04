@@ -48,6 +48,12 @@ Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CP
 - Row reorder now reschedules immediately; the UNSAVED flag clears when undo returns to the last-saved state
 - 34/34 backend pytest, full frontend E2E pass
 
+### Iteration 4 (2026-06)
+- **Asta Powerproject XML export**: Asta has no public native XML schema (it imports MSP XML and P6 XER), so the export is MSP-compatible XML tuned for Asta — a real WBS summary hierarchy (OutlineLevel 1/2/3), OutlineNumber, the WBS code carried in a Text1 extended attribute (FieldID 188743731) that Asta maps to its outline code, calendar week pattern + holiday exceptions, milestones, constraints, slack and full predecessor links
+- **Primavera P6 XER import**: upload a .xer on the dashboard to create a new project — parses %T/%F/%R tables (PROJECT, PROJWBS, TASK, TASKPRED, CALENDAR), maps activity types, hours→working days, PR_FS/SS/FF/SF links with lags, P6 constraint codes → SNET/FNLT/MSO, WBS names into L1/L2/L3 with dotted codes, and recovers the week pattern and holiday exceptions. Round-trip through our own XER is lossless (73 activities / 103 links / same finish date)
+- Non-XER uploads are rejected with a clear message; the import is logged as an assumption entry
+- 51/51 backend pytest, full frontend E2E pass
+
 ## Backlog
 ### P0
 - Stale "running" generation recovery if the pod restarts mid-generation (heartbeat timestamp)
@@ -63,4 +69,4 @@ Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CP
 ## Next tasks
 1. Baseline vs current comparison against a saved snapshot
 2. Per-activity calendars
-3. Asta Powerproject XML export / XER import
+3. MSP XML import; add <DialogDescription> to dialogs to clear the Radix aria warning
