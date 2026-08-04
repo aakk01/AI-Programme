@@ -253,7 +253,7 @@ export const GanttChart = ({
                       fill="hsl(var(--muted-foreground))"
                       fontFamily="IBM Plex Mono, monospace"
                     >
-                      {dur}d
+                      {`${dur}d`}
                     </text>
                   )}
                 </g>

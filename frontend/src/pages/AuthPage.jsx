@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowRight } from "lucide-react";
@@ -16,7 +16,9 @@ export default function AuthPage() {
   const [form, setForm] = useState({ email: "", password: "", name: "" });
   const [busy, setBusy] = useState(false);
 
-  if (user) navigate("/", { replace: true });
+  useEffect(() => {
+    if (user) navigate("/", { replace: true });
+  }, [user, navigate]);
 
   const submit = async (e) => {
     e.preventDefault();
