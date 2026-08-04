@@ -505,6 +505,7 @@ export default function Workspace() {
                   onAdd={addActivity}
                   onDelete={deleteActivity}
                   onReorder={reorder}
+                  reorderEnabled={stageFilter === "__all__"}
                 />
               </Panel>
               <PanelResizeHandle className="h-1.5 border-y border-border bg-[hsl(var(--surface))] transition-colors hover:bg-[hsl(var(--bar))]/40" />

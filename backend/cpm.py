@@ -98,7 +98,7 @@ class WorkCalendar:
             return None
         if d < self._dates[0]:
             return 0
-        for _ in range(40):
+        for _ in range(400):
             if d.isoformat() in self._index:
                 return self._index[d.isoformat()]
             d += timedelta(days=1)

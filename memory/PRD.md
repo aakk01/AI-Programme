@@ -4,17 +4,16 @@
 Web app that turns high-level project parameters into a fully structured, CPM-driven Programme of Works, with WBS hierarchy, dependencies, milestones, an interactive Gantt view, and exports compatible with Primavera P6, Asta Powerproject and MS Project.
 
 ## User choices (confirmed)
-- AI model: **Claude Sonnet 4.6** (Emergent Universal Key) — "Claude Sonnet 5" is not a released model
+- AI model: **Claude Sonnet 4.6** (Emergent Universal Key)
 - Auth: JWT email/password
-- Build order: Phases 1–4 first, then AI chat + exports (all delivered in build 1)
 - Theme: light + dark with toggle
-- Exports: CSV + JSON + MS Project XML
+- Exports: CSV + JSON + MS Project XML (+ P6 XER added in iteration 2)
 
 ## Architecture
 - Frontend: React 19 (CRA/craco), Tailwind, shadcn/ui, react-resizable-panels, custom SVG Gantt
-- Backend: FastAPI — `server.py` (routes), `cpm.py` (CPM engine), `ai_gen.py` (Claude orchestration), `exporters.py`, `auth.py` (JWT + bcrypt)
-- DB: MongoDB collections — `users`, `projects` (embedded activities), `versions`, `chats`
-- AI: `emergentintegrations.LlmChat` → anthropic/claude-sonnet-4-6, async background task + status polling (generation exceeds the 60s ingress timeout)
+- Backend: FastAPI — `server.py` (routes), `cpm.py` (CPM engine + WorkCalendar + variance), `holiday_presets.py`, `ai_gen.py`, `exporters.py`, `auth.py`
+- DB: MongoDB — `users`, `projects` (embedded activities + calendar config), `versions`, `chats`
+- AI: `emergentintegrations.LlmChat` → anthropic/claude-sonnet-4-6, async background task + status polling
 
 ## User personas
 1. Solo planner / planning consultant — needs a defensible baseline fast
@@ -22,37 +21,41 @@ Web app that turns high-level project parameters into a fully structured, CPM-dr
 3. Client / PM — needs an indicative programme with visible assumptions
 
 ## Core requirements (static)
-Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CPM (forward/backward pass, total & free float, critical path, FS/SS/FF/SF with ± lags) · editable P6-style grid with live recalc · interactive Gantt (arrows, red critical path, diamond milestones, summary bars, zoom, WBS filter, drag duration) · exports · AI refinement diff/approve · accounts, dashboard, version snapshots.
+Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CPM (forward/backward pass, total & free float, critical path, FS/SS/FF/SF with ± lags, constraints) · configurable working calendar · editable P6-style grid with live recalc · interactive Gantt · exports · AI refinement diff/approve · accounts, dashboard, version snapshots · variance reporting.
 
-## Implemented (2026-06)
-- JWT signup/login/me, protected routes, logout
-- Project dashboard: create, open, duplicate, delete, stats (activities, duration, finish)
-- 4-step input wizard (Project / Scale / Commercial / Constraints)
-- Async AI baseline generation + polling; assumptions register dialog (14 assumptions on the reference project); 73-activity closed network verified
-- CPM engine: 5-day working calendar, FS/SS/FF/SF ± lags, milestone dur=0, summary rollups, total/free float, critical flags, cycle detection
-- Editable grid (double-click cells), link-syntax validation, add/delete activity, live recalculation, save & persist
-- SVG Gantt: dependency arrows, red critical path, diamond milestones, summary bars, day/week/month zoom, WBS L1 filter, drag right edge to change duration
-- Resizable split view (grid over Gantt), light/dark theme toggle with persistence
-- AI refinement drawer: natural-language instruction → explanation + diff → approve & apply with reschedule
-- Version snapshots, history dialog, restore
-- Exports: CSV, JSON, MS Project XML (PredecessorLink, calendar, slack) — importable to P6 / Asta / MSP
-- Backend pytest suite (22 tests, all passing) in `/app/backend/tests/`
+## Implemented
+### Iteration 1 (2026-06)
+- JWT signup/login/me, protected routes, dashboard (create/open/duplicate/delete)
+- 4-step input wizard; async AI baseline generation + polling; assumptions register
+- CPM engine (5-day week), editable grid with live recalc and link-syntax validation
+- SVG Gantt: arrows, red critical path, diamond milestones, summary bars, zoom, WBS filter, drag durations
+- Resizable split view, light/dark theme, AI refinement drawer with approve-before-apply diffs
+- Version snapshots/restore; CSV / JSON / MS Project XML exports
+- 22/22 backend pytest, full frontend E2E pass
+
+### Iteration 2 (2026-06)
+- **Configurable working calendar**: 5/6/7-day weeks, UK & US public-holiday presets, custom non-working dates; set in the wizard or the workspace calendar dialog; drives CPM, Gantt axis, MSP XML calendar exceptions and XER calendar
+- **Date constraints**: SNET / FNLT / MSO per activity, editable in the grid, produce negative float where the network can't comply
+- **Target-completion variance report**: forecast vs target finish, variance in working and calendar days, status, negative-float register, milestone table, critical-path count
+- **Primavera P6 XER export**: ERMHDR + CURRTYPE, CALENDAR, PROJECT, PROJWBS, TASK, TASKPRED tables with PR_FS/SS/FF/SF links and lag in hours
+- **Row reordering**: drag & drop rows in the grid (disabled while a stage filter is active); order persists on save
+- Fixed: PATCH /projects/{id} partial inputs no longer wipes unspecified fields; grid uses fixed layout so all columns including Float fit on screen
+- 34/34 backend pytest, full frontend E2E pass
 
 ## Backlog
 ### P0
 - Stale "running" generation recovery if the pod restarts mid-generation (heartbeat timestamp)
-- Configurable working calendar: 6/7-day weeks, UK/US public holidays, project-specific non-working days
 ### P1
-- Constraints (Start No Earlier Than, Finish No Later Than) and deadline vs target completion variance report
-- Reorder activities (drag rows), multi-select, copy/paste ranges in the grid
-- Primavera P6 XER export; Asta PP XML export
-- Baseline vs current comparison view (variance bars)
+- Baseline vs current comparison view (variance bars against a snapshot)
+- Multi-select / copy-paste ranges in the grid; undo-redo
+- Asta Powerproject XML export; XER round-trip import
+- Calendar per activity (e.g. 7-day for concrete cure, 5-day for trades)
 ### P2
 - Resource and cost loading, histograms, S-curves
 - Multi-user collaboration / sharing per project (single-owner today)
 - PDF / print-ready programme output with title block
 
 ## Next tasks
-1. Working-calendar configuration (holidays + week pattern) surfaced in the wizard
-2. Date constraints + target-completion variance
-3. P6 XER export
+1. Baseline vs current comparison against a saved snapshot
+2. Per-activity calendars
+3. Undo/redo + range editing in the grid

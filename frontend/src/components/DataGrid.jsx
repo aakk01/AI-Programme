@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 
 const COLS = [
   { key: "activity_id", label: "Activity ID", w: "w-[104px]" },
-  { key: "wbs_l1", label: "WBS L1", w: "w-[150px]" },
-  { key: "description", label: "Description", w: "min-w-[200px]" },
+  { key: "wbs_l1", label: "WBS L1", w: "w-[190px]" },
+  { key: "description", label: "Description", w: "" },
   { key: "type", label: "Type", w: "w-[84px]" },
   { key: "duration", label: "Dur", w: "w-[52px]", num: true },
   { key: "predecessors", label: "Predecessors", w: "w-[140px]" },
@@ -31,6 +31,7 @@ export const DataGrid = ({
   onAdd,
   onDelete,
   onReorder,
+  reorderEnabled = true,
   rowHeight = 26,
 }) => {
   const [draft, setDraft] = useState(null);
@@ -61,7 +62,7 @@ export const DataGrid = ({
 
   return (
     <div className="h-full overflow-auto" data-testid="data-grid">
-      <table className="w-full border-collapse text-left">
+      <table className="w-full table-fixed border-collapse text-left">
         <thead className="sticky top-0 z-10 bg-[hsl(var(--surface))]">
           <tr>
             <th className="w-8 border-b border-r border-border px-1 py-1.5 font-mono-data text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -85,7 +86,7 @@ export const DataGrid = ({
               <tr
                 key={`${a.activity_id}-${i}`}
                 data-testid={`grid-row-${a.activity_id}`}
-                draggable
+                draggable={reorderEnabled}
                 onDragStart={() => setDragId(a.activity_id)}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => drop(a.activity_id)}
@@ -101,11 +102,15 @@ export const DataGrid = ({
                 }`}
               >
                 <td className="border-b border-r border-border px-1 text-center font-mono-data text-[10px] text-muted-foreground">
-                  <span className="group-hover:hidden">{i + 1}</span>
-                  <GripVertical
-                    data-testid={`drag-handle-${a.activity_id}`}
-                    className="mx-auto hidden h-3 w-3 cursor-grab group-hover:block"
-                  />
+                  <span className={reorderEnabled ? "group-hover:hidden" : ""}>
+                    {i + 1}
+                  </span>
+                  {reorderEnabled && (
+                    <GripVertical
+                      data-testid={`drag-handle-${a.activity_id}`}
+                      className="mx-auto hidden h-3 w-3 cursor-grab group-hover:block"
+                    />
+                  )}
                 </td>
                 {COLS.map((c) => {
                   const editing =
@@ -118,8 +123,10 @@ export const DataGrid = ({
                       } ${
                         c.key === "total_float" && a.critical
                           ? "font-semibold text-[hsl(var(--bar-critical))]"
-                          : ""
-                      } ${c.ro ? "text-muted-foreground" : ""}`}
+                          : c.ro
+                            ? "text-muted-foreground"
+                            : ""
+                      }`}
                       onDoubleClick={() =>
                         !c.ro && setDraft({ i, key: c.key, value: cellValue(a, c.key) })
                       }

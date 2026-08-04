@@ -130,7 +130,7 @@ def to_msproject_xml(project_name: str, project_start: str, activities, calendar
 
 # ---------------- Primavera P6 XER ----------------
 XER_PRED = {"FS": "PR_FS", "SS": "PR_SS", "FF": "PR_FF", "SF": "PR_SF"}
-XER_CONSTRAINT = {"SNET": "CS_MSO", "FNLT": "CS_MEOB", "MSO": "CS_MANDSTART"}
+XER_CONSTRAINT = {"SNET": "CS_MSOB", "FNLT": "CS_MEOB", "MSO": "CS_MANDSTART"}
 XER_WORKDAY = {"5-day": 5, "6-day": 6, "7-day": 7}
 
 
