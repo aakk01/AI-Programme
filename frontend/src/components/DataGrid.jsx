@@ -1,23 +1,27 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Diamond, Plus, Trash2 } from "lucide-react";
+import { Diamond, GripVertical, Plus, Trash2 } from "lucide-react";
 import { formatLinks, parseLinks } from "@/lib/links";
 import { Button } from "@/components/ui/button";
 
 const COLS = [
   { key: "activity_id", label: "Activity ID", w: "w-[104px]" },
-  { key: "wbs_l1", label: "WBS L1", w: "w-[168px]" },
-  { key: "description", label: "Description", w: "min-w-[280px]" },
-  { key: "type", label: "Type", w: "w-[92px]" },
-  { key: "duration", label: "Dur", w: "w-[56px]", num: true },
-  { key: "predecessors", label: "Predecessors", w: "w-[168px]" },
-  { key: "successors", label: "Successors", w: "w-[168px]", ro: true },
-  { key: "start", label: "Start", w: "w-[104px]", ro: true },
-  { key: "finish", label: "Finish", w: "w-[104px]", ro: true },
-  { key: "total_float", label: "Float", w: "w-[56px]", ro: true, num: true },
+  { key: "wbs_l1", label: "WBS L1", w: "w-[150px]" },
+  { key: "description", label: "Description", w: "min-w-[200px]" },
+  { key: "type", label: "Type", w: "w-[84px]" },
+  { key: "duration", label: "Dur", w: "w-[52px]", num: true },
+  { key: "predecessors", label: "Predecessors", w: "w-[140px]" },
+  { key: "successors", label: "Successors", w: "w-[130px]", ro: true },
+  { key: "constraint_type", label: "Cons.", w: "w-[64px]" },
+  { key: "constraint_date", label: "Cons. Date", w: "w-[100px]" },
+  { key: "start", label: "Start", w: "w-[100px]", ro: true },
+  { key: "finish", label: "Finish", w: "w-[100px]", ro: true },
+  { key: "total_float", label: "Float", w: "w-[52px]", ro: true, num: true },
 ];
 
 const TYPES = ["Task", "Milestone", "Summary"];
+const CONSTRAINTS = ["", "SNET", "FNLT", "MSO"];
+const SELECTS = { type: TYPES, constraint_type: CONSTRAINTS };
 
 export const DataGrid = ({
   activities,
@@ -26,9 +30,11 @@ export const DataGrid = ({
   onEdit,
   onAdd,
   onDelete,
+  onReorder,
   rowHeight = 26,
 }) => {
   const [draft, setDraft] = useState(null);
+  const [dragId, setDragId] = useState(null);
 
   const commit = (index, key, value) => {
     if (key === "predecessors") {
@@ -47,6 +53,11 @@ export const DataGrid = ({
 
   const cellValue = (a, key) =>
     key === "predecessors" ? formatLinks(a.predecessors) : (a[key] ?? "");
+
+  const drop = (targetId) => {
+    if (dragId && targetId && dragId !== targetId) onReorder(dragId, targetId);
+    setDragId(null);
+  };
 
   return (
     <div className="h-full overflow-auto" data-testid="data-grid">
@@ -74,16 +85,27 @@ export const DataGrid = ({
               <tr
                 key={`${a.activity_id}-${i}`}
                 data-testid={`grid-row-${a.activity_id}`}
+                draggable
+                onDragStart={() => setDragId(a.activity_id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => drop(a.activity_id)}
+                onDragEnd={() => setDragId(null)}
                 onClick={() => onSelect(a.activity_id)}
                 style={{ height: rowHeight }}
                 className={`group cursor-pointer ${
+                  dragId === a.activity_id ? "opacity-40" : ""
+                } ${
                   selected
                     ? "bg-[hsl(var(--bar))]/10"
                     : "hover:bg-[hsl(var(--surface))]"
                 }`}
               >
                 <td className="border-b border-r border-border px-1 text-center font-mono-data text-[10px] text-muted-foreground">
-                  {i + 1}
+                  <span className="group-hover:hidden">{i + 1}</span>
+                  <GripVertical
+                    data-testid={`drag-handle-${a.activity_id}`}
+                    className="mx-auto hidden h-3 w-3 cursor-grab group-hover:block"
+                  />
                 </td>
                 {COLS.map((c) => {
                   const editing =
@@ -103,18 +125,18 @@ export const DataGrid = ({
                       }
                     >
                       {editing ? (
-                        c.key === "type" ? (
+                        SELECTS[c.key] ? (
                           <select
                             autoFocus
-                            data-testid={`cell-type-${a.activity_id}`}
+                            data-testid={`cell-${c.key}-${a.activity_id}`}
                             className="cell-input"
                             value={draft.value}
-                            onChange={(e) => commit(i, "type", e.target.value)}
+                            onChange={(e) => commit(i, c.key, e.target.value)}
                             onBlur={() => setDraft(null)}
                           >
-                            {TYPES.map((t) => (
-                              <option key={t} value={t}>
-                                {t}
+                            {SELECTS[c.key].map((t) => (
+                              <option key={t || "none"} value={t}>
+                                {t || "—"}
                               </option>
                             ))}
                           </select>
@@ -122,8 +144,9 @@ export const DataGrid = ({
                           <input
                             autoFocus
                             data-testid={`cell-${c.key}-${a.activity_id}`}
+                            type={c.key === "constraint_date" ? "date" : "text"}
                             className={`cell-input ${c.num ? "text-right" : ""}`}
-                            value={draft.value}
+                            value={draft.value || ""}
                             onChange={(e) =>
                               setDraft({ ...draft, value: e.target.value })
                             }

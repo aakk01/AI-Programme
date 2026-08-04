@@ -3,11 +3,13 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  CalendarCog,
   ClipboardList,
   Download,
   History,
   Save,
   Sparkles,
+  TrendingUp,
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { api, downloadExport, errMsg } from "@/lib/api";
@@ -35,6 +37,8 @@ import {
 import { DataGrid } from "@/components/DataGrid";
 import { GanttChart } from "@/components/GanttChart";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
+import { CalendarDialog } from "@/components/CalendarDialog";
+import { VarianceDialog } from "@/components/VarianceDialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const ZOOMS = ["day", "week", "month"];
@@ -56,6 +60,9 @@ export default function Workspace() {
   const [chatOpen, setChatOpen] = useState(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [versions, setVersions] = useState(null);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [variance, setVariance] = useState(null);
+  const [showVariance, setShowVariance] = useState(false);
 
   const ingest = useCallback((data) => {
     setProject(data);
@@ -131,6 +138,28 @@ export default function Workspace() {
       setActivities(data.activities);
       setSchedule({ ...data, activities: undefined });
       if (data.has_cycle) toast.error("Circular logic detected in the network");
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
+  const reorder = (fromId, toId) => {
+    const from = activities.findIndex((a) => a.activity_id === fromId);
+    const to = activities.findIndex((a) => a.activity_id === toId);
+    if (from < 0 || to < 0) return;
+    const next = [...activities];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setActivities(next);
+    setDirty(true);
+  };
+
+  const openVariance = async () => {
+    setVariance(null);
+    setShowVariance(true);
+    try {
+      const { data } = await api.get(`/projects/${id}/variance`);
+      setVariance(data);
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -310,6 +339,27 @@ export default function Workspace() {
           </div>
 
           <Button
+            data-testid="calendar-button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-sm text-xs"
+            onClick={() => setShowCalendar(true)}
+          >
+            <CalendarCog className="mr-1.5 h-3.5 w-3.5" />
+            {project?.calendar?.week_pattern || "5-day"}
+          </Button>
+
+          <Button
+            data-testid="variance-button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-sm text-xs"
+            onClick={openVariance}
+          >
+            <TrendingUp className="mr-1.5 h-3.5 w-3.5" /> Variance
+          </Button>
+
+          <Button
             data-testid="assumptions-button"
             variant="outline"
             size="sm"
@@ -368,7 +418,13 @@ export default function Workspace() {
                 data-testid="export-xml"
                 onClick={() => downloadExport(id, "xml")}
               >
-                MS Project XML (P6 / Asta / MSP)
+                MS Project XML (MSP / Asta)
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="export-xer"
+                onClick={() => downloadExport(id, "xer")}
+              >
+                Primavera P6 XER
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -448,6 +504,7 @@ export default function Workspace() {
                   onEdit={editCell}
                   onAdd={addActivity}
                   onDelete={deleteActivity}
+                  onReorder={reorder}
                 />
               </Panel>
               <PanelResizeHandle className="h-1.5 border-y border-border bg-[hsl(var(--surface))] transition-colors hover:bg-[hsl(var(--bar))]/40" />
@@ -455,6 +512,7 @@ export default function Workspace() {
                 <GanttChart
                   activities={visible}
                   projectStart={schedule?.project_start}
+                  calendar={schedule?.calendar}
                   zoom={zoom}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
@@ -472,6 +530,20 @@ export default function Workspace() {
           onApplied={ingest}
         />
       </div>
+
+      <CalendarDialog
+        open={showCalendar}
+        onOpenChange={setShowCalendar}
+        projectId={id}
+        calendar={project?.calendar}
+        onSaved={ingest}
+      />
+
+      <VarianceDialog
+        open={showVariance}
+        onOpenChange={setShowVariance}
+        report={variance}
+      />
 
       <Dialog open={showAssumptions} onOpenChange={setShowAssumptions}>
         <DialogContent className="max-w-2xl rounded-sm bg-background">

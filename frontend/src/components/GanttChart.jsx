@@ -1,20 +1,31 @@
 import { useMemo, useRef, useState } from "react";
 
-const addWorkingDays = (startIso, n) => {
-  const d = new Date(`${startIso}T00:00:00`);
+const WEEK_DAYS = {
+  "5-day": [1, 2, 3, 4, 5],
+  "6-day": [1, 2, 3, 4, 5, 6],
+  "7-day": [0, 1, 2, 3, 4, 5, 6],
+};
+
+const iso = (d) => d.toISOString().slice(0, 10);
+
+const addWorkingDays = (startIso, n, cal) => {
+  const working = WEEK_DAYS[cal?.week_pattern || "5-day"];
+  const holidays = new Set(cal?.holidays || []);
+  const ok = (d) => working.includes(d.getDay()) && !holidays.has(iso(d));
+  const d = new Date(`${startIso}T00:00:00Z`);
   let remaining = Math.max(0, n);
   while (remaining > 0) {
-    d.setDate(d.getDate() + 1);
-    if (d.getDay() !== 0 && d.getDay() !== 6) remaining -= 1;
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (ok(d)) remaining -= 1;
   }
-  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  while (!ok(d)) d.setUTCDate(d.getUTCDate() + 1);
   return d;
 };
 
 const fmt = (d, zoom) =>
   zoom === "month"
-    ? d.toLocaleDateString(undefined, { month: "short", year: "2-digit" })
-    : d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+    ? d.toLocaleDateString(undefined, { month: "short", year: "2-digit", timeZone: "UTC" })
+    : d.toLocaleDateString(undefined, { day: "2-digit", month: "short", timeZone: "UTC" });
 
 const PX = { day: 26, week: 8, month: 2.6 };
 const TICK = { day: 1, week: 5, month: 20 };
@@ -22,6 +33,7 @@ const TICK = { day: 1, week: 5, month: 20 };
 export const GanttChart = ({
   activities,
   projectStart,
+  calendar,
   zoom = "week",
   rowHeight = 26,
   selectedId,
@@ -46,7 +58,7 @@ export const GanttChart = ({
 
   const ticks = [];
   for (let i = 0; i <= total; i += TICK[zoom]) {
-    ticks.push({ i, label: fmt(addWorkingDays(projectStart, i), zoom) });
+    ticks.push({ i, label: fmt(addWorkingDays(projectStart, i, calendar), zoom) });
   }
 
   const startDrag = (e, a, index) => {

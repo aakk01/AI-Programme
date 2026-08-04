@@ -35,6 +35,8 @@ export const EDITABLE_KEYS = [
   "type",
   "duration",
   "predecessors",
+  "constraint_type",
+  "constraint_date",
 ];
 
 export const stripComputed = (activities) =>

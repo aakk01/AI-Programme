@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 2 backend + frontend full pass. 34/34 pytest across auth, projects CRUD, CPM, exports/versions, and the new 14-test suite covering calendar (5/6/7-day + UK/US presets + custom holidays), SNET/FNLT/MSO constraints, variance report, XER export (ERMHDR + %T CURRTYPE/CALENDAR/PROJECT/PROJWBS/TASK/TASKPRED + PR_FS/SS/FF/SF, lag_hr_cnt=lag*8), CSV Free-Float/Constraint columns, MSP XML calendar exceptions + ConstraintType, JSON calendar block, and PATCH merge fix. Frontend E2E on preview URL: login->workspace, calendar-button shows current week-pattern label ('5-day'), CalendarDialog opens with week-pattern/holiday-region/custom-date/add-date/save + calendar-remove-{date} chip; add 2028-06-05 -> save -> 'Calendar updated — programme rescheduled' toast fires. Variance dialog renders forecast/target/variance/status/calendar-days/duration/week-pattern/holidays plus key-milestones and critical-path (Riverside 2028-12-01 target -> +77wd late, 20 critical activities). Grid shows new 'Cons.' + 'Cons. Date' columns; double-click td[8] on A1000 -> cell-constraint_type-A1000 select; pick SNET; double-click td[9] -> cell-constraint_date-A1000 date input; set 2029-01-15, Enter -> UNSAVED indicator, float td gets bar-critical red class. Export dropdown has export-csv (13KB), export-json (59KB), export-xml (71KB) and new export-xer (22KB Riverside_Tower.xer, head='ERMHDR\\t19.12...'). Drag reorder via HTML5 DragEvent (dragstart + wait + dragover+drop) moves A1030 from index 3 -> after A1050; UNSAVED shown. drag-handle-{id} present in DOM on hover. Wizard step 4 shows wizard-week-pattern + wizard-holiday-region selects; creating a project with 6-day + UK stored calendar={week_pattern:'6-day', holiday_region:'UK', holidays:[]} verified via GET /api/projects/{id}. AI generation smoke-checked (wizard submit triggered 'Drafting your programme…' but not awaited per brief; test project cleaned up).\n\nAI features: primary=AI baseline programme generation (Claude Sonnet 4.6 via emergentintegrations) = not-in-scope-this-iteration (iteration 2 shipped calendar/constraints/variance/XER/drag features; AI code paths unchanged from iter1). AI refinement chat = not-in-scope-this-iteration. Skipped rerun to avoid Emergent 429 concurrency retries and paid credit burn per review-request note.\n\nSkills loaded: ai-testing-core (AI paths not exercised this run per brief).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "DataGrid total_float cell", "issues": ["Cell class stacks both 'text-muted-foreground' (c.ro:true) and 'text-[hsl(var(--bar-critical))]' (a.critical=true); Tailwind resolves via last-declared but the two colour utilities can conflict on cascade order. Visually renders red for critical rows in the screenshot so it works, but consider explicit precedence (e.g. drop the muted-foreground on critical rows) to avoid future ambiguity."]}
+    ]
+  },
+  "critical_code_review_comments": [
+    "server.py update_project(): the merge now preserves start_date/project_type when only completion_date is patched (regression fixed, unit-tested). Consider validating that body['inputs'] is a dict before merging; a non-dict payload will 500 on **body['inputs']. Minor.",
+    "server.py set_calendar() stores the RAW calendar body (week_pattern + region + custom list) but returns with_schedule which expands the holiday set — good separation. Consider explicitly noting in the API docs that GET /projects/{id}.calendar is the raw config and GET .../variance or .../export/json expose the expanded holidays under schedule.calendar.",
+    "cpm.calculate(): index_of() only rolls forward up to 40 days. If a constraint_date lands on a very long shutdown (>40 non-working days in a row, e.g., custom 8-week holiday) the constraint will silently be dropped. Rare but should raise or clamp explicitly.",
+    "cpm.calculate() constraint FNLT LF adjustment: uses lf = min(lf, ci + 1). Off-by-one? For a task that must finish no later than date D (working-day index ci), the LF (exclusive) should be ci+1 which is correct. Unit test test_fnlt_produces_negative_float_and_critical confirms neg float, so behaviour matches spec.",
+    "exporters.to_xer XER_CONSTRAINT map maps SNET->CS_MSO, MSO->CS_MANDSTART. Standard P6 uses CS_MSOB (Start On or After) for SNET and CS_MANDSTART for MSO — CS_MSO is not a standard P6 code. Some P6 importers may not recognise CS_MSO; recommend switching to CS_MSOB. Non-blocking for pytest structural validation.",
+    "DataGrid onReorder relies on native HTML5 drag; works with dragstart+setTimeout+drop pattern. Consider adding an aria-grabbed/aria-dropeffect or using a lib (react-dnd/dnd-kit) for accessibility. Playwright synchronous DragEvent dispatch initially failed until we introduced a settle timeout — real users don't hit this, but E2E stability could benefit from a small setDragId+ref alternative to closure-captured state.",
+    "Workspace.jsx reorder() splices into visible-index positions but activities is the full list; because visible is a filtered view when stage-filter is not '__all__', dragging a filtered row could produce ambiguous ordering. Consider disabling drag when a stage filter is active or reordering only within the filtered subset.",
+    "CalendarDialog restores 'holidays' from calendar prop as expanded list only if the parent passes it — currently it correctly reads calendar?.holidays (raw config), good.",
+    "AuthPage still triggers React 'setState during render' warning noted in iter1; still not fixed. Non-blocking."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_auth.py",
+    "/app/backend/tests/test_projects_crud.py",
+    "/app/backend/tests/test_cpm.py",
+    "/app/backend/tests/test_exports_versions.py",
+    "/app/backend/tests/test_calendar_constraints_variance_xer.py",
+    "/app/backend/tests/test_ai.py",
+    "/app/test_reports/pytest/iter2_new.xml",
+    "/app/test_reports/pytest/iter2_regression.xml"
+  ],
+  "action_items": [
+    "(Optional) Change exporters.XER_CONSTRAINT SNET mapping from CS_MSO to CS_MSOB for P6 import compatibility.",
+    "(Optional) Clamp/error in cpm.index_of when constraint date falls in a >40-day non-working gap.",
+    "(Optional) Fix AuthPage 'setState during render' warning (still present from iter1).",
+    "(Optional) Guard update_project against non-dict body['inputs']."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_calendar_constraints_variance_xer.py"
+  ],
+  "success_rate": {"backend": "100% (34/34 pytest, excluding AI which was skipped per brief)", "frontend": "100% (calendar, variance, constraints, XER export, CSV/JSON/XML downloads, drag-reorder, wizard-cal-fields all pass)"},
+  "test_credentials": "planner@test.com / Test1234 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Used existing seeded project ed60c71a-2483-4e54-b062-e9414efe35ce (Riverside Tower, 73 activities). All test-generated projects prefixed TEST_ and cleaned up. Wizard smoke-test project auto-deleted after calendar verification.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter2 test file at /app/backend/tests/test_calendar_constraints_variance_xer.py covers all new features. Backend AI generation still Emergent single-concurrency; don't parallelise AI tests. Grid drag-reorder testing in headless Playwright requires dragstart -> wait 200ms (React state settle) -> dragover + drop as separate evaluate() calls, otherwise the drop closure captures stale dragId=null. Grid cell double-click via native onDoubleClick works when dispatched with new MouseEvent('dblclick', {bubbles:true,cancelable:true}) on the specific td index (Cons=td[8], Cons. Date=td[9]). Workspace stat labels are uppercase-transformed via CSS (font-mono-data uppercase) so document.body.innerText returns uppercase — use case-insensitive string checks. Login testids are email-input/password-input/auth-submit (not login-email/login-password/login-submit).",
+  "rca_of_the_issue": "N/A — no failing scenarios. Initial drag test failed because I bunched dragstart+drop in one evaluate() closure, causing React setDragId to still be null when onDrop fired. Adding await page.wait_for_timeout(200) between the two events lets React flush state before drop runs, and the reorder then completes correctly."
+}

@@ -65,6 +65,8 @@ export default function Wizard() {
     site_constraints: "",
     sectional_completions: "",
     notes: "",
+    week_pattern: "5-day",
+    holiday_region: "none",
   });
 
   const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
@@ -90,6 +92,11 @@ export default function Wizard() {
           site_constraints: form.site_constraints,
           sectional_completions: form.sectional_completions,
           notes: form.notes,
+        },
+        calendar: {
+          week_pattern: form.week_pattern,
+          holiday_region: form.holiday_region,
+          holidays: [],
         },
       });
       navigate(`/project/${data.id}?generate=1`);
@@ -303,6 +310,37 @@ export default function Wizard() {
 
           {step === 3 && (
             <>
+              <div className="grid gap-5 sm:grid-cols-2">
+                {field(
+                  "Working week",
+                  <Select value={form.week_pattern} onValueChange={set("week_pattern")}>
+                    <SelectTrigger data-testid="wizard-week-pattern" className="rounded-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="5-day">5-day week (Mon–Fri)</SelectItem>
+                      <SelectItem value="6-day">6-day week (Mon–Sat)</SelectItem>
+                      <SelectItem value="7-day">7-day week (continuous)</SelectItem>
+                    </SelectContent>
+                  </Select>,
+                )}
+                {field(
+                  "Public holidays",
+                  <Select
+                    value={form.holiday_region}
+                    onValueChange={set("holiday_region")}
+                  >
+                    <SelectTrigger data-testid="wizard-holiday-region" className="rounded-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="UK">UK bank holidays</SelectItem>
+                      <SelectItem value="US">US federal holidays</SelectItem>
+                    </SelectContent>
+                  </Select>,
+                )}
+              </div>
               {field(
                 "Long-lead items",
                 <Textarea

@@ -60,6 +60,8 @@ class Activity(BaseModel):
     type: Literal["Task", "Milestone", "Summary"] = "Task"
     duration: int = 0
     predecessors: List[Link] = Field(default_factory=list)
+    constraint_type: Literal["", "SNET", "FNLT", "MSO"] = ""
+    constraint_date: Optional[str] = None
 
 
 class ProjectInputs(BaseModel):
@@ -80,6 +82,13 @@ class ProjectInputs(BaseModel):
     notes: str = ""
 
 
+class CalendarConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    week_pattern: Literal["5-day", "6-day", "7-day"] = "5-day"
+    holiday_region: Literal["none", "UK", "US"] = "none"
+    holidays: List[str] = Field(default_factory=list)
+
+
 class SignupBody(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
@@ -94,6 +103,7 @@ class LoginBody(BaseModel):
 class ProjectCreate(BaseModel):
     name: str
     inputs: ProjectInputs
+    calendar: CalendarConfig = Field(default_factory=CalendarConfig)
 
 
 class ActivitiesUpdate(BaseModel):
@@ -112,13 +122,15 @@ class ApplyChangesBody(BaseModel):
 def schedule(project: dict) -> dict:
     start = project.get("inputs", {}).get("start_date") or date.today().isoformat()
     acts = [a if isinstance(a, dict) else a.model_dump() for a in project.get("activities", [])]
-    return cpm.calculate(acts, start)
+    return cpm.calculate(acts, start, project.get("calendar"))
 
 
 def with_schedule(project: dict) -> dict:
     res = schedule(project)
     project["activities"] = res["activities"]
-    project["schedule"] = {k: v for k, v in res.items() if k != "activities"}
+    project["schedule"] = {
+        k: v for k, v in res.items() if k not in ("activities", "_calendar_obj")
+    }
     return project
 
 
@@ -200,6 +212,7 @@ async def create_project(body: ProjectCreate, user_id: str = Depends(get_current
         "user_id": user_id,
         "name": body.name.strip() or "Untitled Programme",
         "inputs": inputs,
+        "calendar": body.calendar.model_dump(),
         "activities": [],
         "assumptions": [],
         "summary": "",
@@ -216,6 +229,29 @@ async def read_project(project_id: str, user_id: str = Depends(get_current_user_
     return with_schedule(await get_project(project_id, user_id))
 
 
+@api.put("/projects/{project_id}/calendar")
+async def set_calendar(project_id: str, body: CalendarConfig,
+                       user_id: str = Depends(get_current_user_id)):
+    p = await get_project(project_id, user_id)
+    updates = {"calendar": body.model_dump(), "updated_at": now_iso()}
+    await db.projects.update_one({"id": project_id}, {"$set": updates})
+    return with_schedule({**p, **updates})
+
+
+@api.get("/projects/{project_id}/variance")
+async def variance(project_id: str, user_id: str = Depends(get_current_user_id)):
+    p = await get_project(project_id, user_id)
+    res = schedule(p)
+    report = cpm.variance_report(
+        res, p.get("inputs", {}).get("completion_date"), res["activities"]
+    )
+    report["project_name"] = p["name"]
+    report["project_start"] = res["project_start"]
+    report["duration_working_days"] = res["duration_working_days"]
+    report["calendar"] = res["calendar"]
+    return report
+
+
 @api.patch("/projects/{project_id}")
 async def update_project(project_id: str, body: dict, user_id: str = Depends(get_current_user_id)):
     p = await get_project(project_id, user_id)
@@ -223,7 +259,8 @@ async def update_project(project_id: str, body: dict, user_id: str = Depends(get
     if "name" in body:
         updates["name"] = str(body["name"]).strip() or p["name"]
     if "inputs" in body:
-        updates["inputs"] = {**p.get("inputs", {}), **ProjectInputs(**body["inputs"]).model_dump()}
+        merged = {**p.get("inputs", {}), **(body["inputs"] or {})}
+        updates["inputs"] = ProjectInputs(**merged).model_dump()
     await db.projects.update_one({"id": project_id}, {"$set": updates})
     return with_schedule({**p, **updates})
 
@@ -434,6 +471,7 @@ async def export(project_id: str, fmt: str, user_id: str = Depends(get_current_u
         import json
         payload = {
             "programme_name": p["name"], "inputs": p.get("inputs", {}),
+            "calendar": p.get("calendar", {}),
             "summary": p.get("summary", ""), "assumptions": p.get("assumptions", []),
             "schedule": p["schedule"], "activities": acts,
         }
@@ -443,9 +481,20 @@ async def export(project_id: str, fmt: str, user_id: str = Depends(get_current_u
         )
     if fmt in ("xml", "mspxml"):
         return Response(
-            exporters.to_msproject_xml(p["name"], p["schedule"]["project_start"], acts),
+            exporters.to_msproject_xml(
+                p["name"], p["schedule"]["project_start"], acts, p["schedule"]["calendar"]
+            ),
             media_type="application/xml",
             headers={"Content-Disposition": f'attachment; filename="{slug}.xml"'},
+        )
+    if fmt == "xer":
+        return Response(
+            exporters.to_xer(
+                p["name"], p["schedule"]["project_start"], p["schedule"]["project_finish"],
+                acts, p["schedule"]["calendar"],
+            ),
+            media_type="text/plain",
+            headers={"Content-Disposition": f'attachment; filename="{slug}.xer"'},
         )
     raise HTTPException(status_code=400, detail="Unsupported format")
 
