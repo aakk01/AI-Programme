@@ -40,6 +40,182 @@ def _dt(d, end=False):
     return f"{day.isoformat()}T{'17:00:00' if end else '08:00:00'}"
 
 
+def _calendar_xml(cal):
+    pattern = cal.get("week_pattern", "5-day")
+    working = WEEKDAY_WORKING.get(pattern, WEEKDAY_WORKING["5-day"])
+    hours = (
+        "<WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime>"
+        "<WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes>"
+    )
+    weekdays = "".join(
+        f"<WeekDay><DayType>{d}</DayType><DayWorking>{1 if d in working else 0}</DayWorking>"
+        f"{hours if d in working else ''}</WeekDay>"
+        for d in range(1, 8)
+    )
+    exceptions = "".join(
+        f"<Exception><EnteredByOccurrences>0</EnteredByOccurrences><TimePeriod>"
+        f"<FromDate>{h}T00:00:00</FromDate><ToDate>{h}T23:59:00</ToDate></TimePeriod>"
+        f"<Occurrences>1</Occurrences><Name>Holiday</Name><Type>1</Type><DayWorking>0</DayWorking></Exception>"
+        for h in cal.get("holidays", [])
+    )
+    return working, f"""  <Calendars>
+    <Calendar>
+      <UID>1</UID>
+      <Name>Programme Calendar</Name>
+      <IsBaseCalendar>1</IsBaseCalendar>
+      <WeekDays>{weekdays}</WeekDays>
+      <Exceptions>{exceptions}</Exceptions>
+    </Calendar>
+  </Calendars>"""
+
+
+def _task_links(a, uid):
+    return "".join(
+        f"<PredecessorLink><PredecessorUID>{uid[p['id']]}</PredecessorUID>"
+        f"<Type>{LINK_CODE.get(p.get('type', 'FS'), 1)}</Type>"
+        f"<LinkLag>{int(p.get('lag', 0)) * 4800}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>"
+        for p in (a.get("predecessors") or [])
+        if p.get("id") in uid
+    )
+
+
+WBS_FIELD_ID = 188743731  # Text1 — Asta maps this to the WBS outline code on import
+
+
+def to_asta_xml(project_name: str, project_start: str, activities, calendar=None) -> str:
+    """MS Project XML tuned for Asta Powerproject: real WBS summary hierarchy plus
+    the WBS code carried in a Text1 outline-code custom field."""
+    cal = calendar or {}
+    working, calendars = _calendar_xml(cal)
+    leaves = [a for a in activities if a.get("type") != "Summary"]
+
+    groups = {}
+    for a in leaves:
+        key = (a.get("wbs_l1") or "Programme", a.get("wbs_l2") or "General")
+        groups.setdefault(key, []).append(a)
+
+    uid, next_uid = {}, 0
+    rows, seq = [], 0
+
+    def span(items):
+        starts = [str(x.get("start") or project_start) for x in items]
+        finishes = [str(x.get("finish") or project_start) for x in items]
+        return min(starts), max(finishes)
+
+    l1_order, l2_by_l1 = [], {}
+    for (l1, l2) in groups:
+        if l1 not in l1_order:
+            l1_order.append(l1)
+            l2_by_l1[l1] = []
+        if l2 not in l2_by_l1[l1]:
+            l2_by_l1[l1].append(l2)
+
+    def add_row(name, level, wbs_code, start, finish, duration, task=None):
+        nonlocal next_uid, seq
+        next_uid += 1
+        seq += 1
+        is_summary = task is None
+        atype = "Summary" if is_summary else task.get("type", "Task")
+        if not is_summary:
+            uid[task["activity_id"]] = next_uid
+        rows.append({
+            "uid": next_uid, "id": seq, "name": name, "level": level, "wbs": wbs_code,
+            "start": start, "finish": finish, "duration": duration,
+            "milestone": 1 if atype == "Milestone" else 0,
+            "summary": 1 if is_summary else 0,
+            "task": task,
+        })
+
+    for i, l1 in enumerate(l1_order, start=1):
+        l1_items = [a for (k1, _), items in groups.items() if k1 == l1 for a in items]
+        s, f = span(l1_items)
+        add_row(l1, 1, str(i), s, f, 0)
+        for j, l2 in enumerate(l2_by_l1[l1], start=1):
+            items = groups[(l1, l2)]
+            s2, f2 = span(items)
+            add_row(l2, 2, f"{i}.{j}", s2, f2, 0)
+            for a in items:
+                dur = 0 if a.get("type") == "Milestone" else int(a.get("duration") or 0)
+                add_row(
+                    a.get("description") or a["activity_id"], 3,
+                    a.get("wbs_code") or f"{i}.{j}",
+                    str(a.get("start") or project_start),
+                    str(a.get("finish") or project_start), dur, task=a,
+                )
+
+    task_xml = []
+    for r in rows:
+        a = r["task"]
+        ext = (
+            f"<ExtendedAttribute><FieldID>{WBS_FIELD_ID}</FieldID>"
+            f"<Value>{escape(str(r['wbs']))}</Value></ExtendedAttribute>"
+        )
+        extra = ""
+        if a is not None:
+            ctype = (a.get("constraint_type") or "").upper()
+            cdate = a.get("constraint_date")
+            extra = (
+                f"<ConstraintType>{MSP_CONSTRAINT.get(ctype, 0)}</ConstraintType>"
+                + (f"<ConstraintDate>{_dt(cdate)}</ConstraintDate>" if ctype and cdate else "")
+                + f"<TotalSlack>{int(a.get('total_float') or 0) * 4800}</TotalSlack>"
+                + f"<FreeSlack>{int(a.get('free_float') or 0) * 4800}</FreeSlack>"
+                + f"<Critical>{1 if a.get('critical') else 0}</Critical>"
+                + f"<Notes>{escape(a['activity_id'])}</Notes>"
+                + _task_links(a, uid)
+            )
+        task_xml.append(f"""    <Task>
+      <UID>{r['uid']}</UID>
+      <ID>{r['id']}</ID>
+      <Name>{escape(str(r['name']))}</Name>
+      <Type>1</Type>
+      <Active>1</Active>
+      <Manual>0</Manual>
+      <OutlineLevel>{r['level']}</OutlineLevel>
+      <OutlineNumber>{r['wbs']}</OutlineNumber>
+      <WBS>{escape(str(r['wbs']))}</WBS>
+      <Milestone>{r['milestone']}</Milestone>
+      <Summary>{r['summary']}</Summary>
+      <Start>{_dt(r['start'])}</Start>
+      <Finish>{_dt(r['finish'], end=True)}</Finish>
+      <Duration>PT{int(r['duration']) * 8}H0M0S</Duration>
+      <DurationFormat>7</DurationFormat>
+      <CalendarUID>1</CalendarUID>
+      {ext}{extra}
+    </Task>""")
+
+    finish = max([str(r["finish"]) for r in rows] or [project_start])
+    per_week = 480 * len(working)
+    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <SaveVersion>14</SaveVersion>
+  <Name>{escape(project_name)}.xml</Name>
+  <Title>{escape(project_name)}</Title>
+  <Author>Programme of Works Generator</Author>
+  <ScheduleFromStart>1</ScheduleFromStart>
+  <StartDate>{_dt(project_start)}</StartDate>
+  <FinishDate>{_dt(finish, end=True)}</FinishDate>
+  <CurrentDate>{datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}</CurrentDate>
+  <CalendarUID>1</CalendarUID>
+  <DurationFormat>7</DurationFormat>
+  <MinutesPerDay>480</MinutesPerDay>
+  <MinutesPerWeek>{per_week}</MinutesPerWeek>
+  <DaysPerMonth>20</DaysPerMonth>
+  <NewTasksAreManual>0</NewTasksAreManual>
+  <ExtendedAttributes>
+    <ExtendedAttribute>
+      <FieldID>{WBS_FIELD_ID}</FieldID>
+      <FieldName>Text1</FieldName>
+      <Alias>WBS Code</Alias>
+    </ExtendedAttribute>
+  </ExtendedAttributes>
+{calendars}
+  <Tasks>
+{chr(10).join(task_xml)}
+  </Tasks>
+</Project>
+"""
+
+
 def to_msproject_xml(project_name: str, project_start: str, activities, calendar=None) -> str:
     cal = calendar or {}
     pattern = cal.get("week_pattern", "5-day")

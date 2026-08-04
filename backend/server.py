@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -19,6 +19,7 @@ load_dotenv(ROOT_DIR / ".env")
 import ai_gen  # noqa: E402
 import cpm  # noqa: E402
 import exporters  # noqa: E402
+import xer_import  # noqa: E402
 from auth import (  # noqa: E402
     create_access_token,
     get_current_user_id,
@@ -222,6 +223,53 @@ async def create_project(body: ProjectCreate, user_id: str = Depends(get_current
     }
     await db.projects.insert_one(dict(project))
     return with_schedule(project)
+
+
+@api.post("/projects/import/xer")
+async def import_xer(file: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
+    raw = await file.read()
+    if len(raw) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 12MB)")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252", errors="replace")
+    try:
+        parsed = xer_import.import_xer(text)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read XER file: {e}")
+
+    activities = [Activity(**a).model_dump() for a in parsed["activities"]]
+    name = parsed["name"]
+    if file.filename:
+        name = name or file.filename.rsplit(".", 1)[0]
+    project = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "name": name,
+        "inputs": ProjectInputs(start_date=parsed["start_date"]).model_dump(),
+        "calendar": CalendarConfig(
+            week_pattern=parsed["week_pattern"], holidays=parsed.get("holidays", [])
+        ).model_dump(),
+        "activities": activities,
+        "assumptions": [{
+            "category": "Import",
+            "assumption": f"Imported from Primavera P6 XER '{file.filename}'.",
+            "basis": (
+                f"{parsed['stats']['activities']} activities, {parsed['stats']['links']} links, "
+                f"{parsed['stats']['milestones']} milestones, {parsed['stats']['wbs_nodes']} WBS nodes. "
+                "Dates recalculated by the CPM engine; resources, costs and codes were not imported."
+            ),
+        }],
+        "summary": "Programme imported from a Primavera P6 XER file and rescheduled by the CPM engine.",
+        "version": 1,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.projects.insert_one(dict(project))
+    result = with_schedule(project)
+    result["import_stats"] = parsed["stats"]
+    return result
 
 
 @api.get("/projects/{project_id}")
@@ -486,6 +534,14 @@ async def export(project_id: str, fmt: str, user_id: str = Depends(get_current_u
             ),
             media_type="application/xml",
             headers={"Content-Disposition": f'attachment; filename="{slug}.xml"'},
+        )
+    if fmt in ("asta", "astaxml", "pp"):
+        return Response(
+            exporters.to_asta_xml(
+                p["name"], p["schedule"]["project_start"], acts, p["schedule"]["calendar"]
+            ),
+            media_type="application/xml",
+            headers={"Content-Disposition": f'attachment; filename="{slug}-asta.xml"'},
         )
     if fmt == "xer":
         return Response(

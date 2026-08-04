@@ -507,6 +507,12 @@ export default function Workspace() {
                 MS Project XML (MSP / Asta)
               </DropdownMenuItem>
               <DropdownMenuItem
+                data-testid="export-asta"
+                onClick={() => downloadExport(id, "asta")}
+              >
+                Asta Powerproject XML
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 data-testid="export-xer"
                 onClick={() => downloadExport(id, "xer")}
               >

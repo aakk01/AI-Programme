@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -8,6 +8,7 @@ import {
   LogOut,
   Plus,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -19,6 +20,27 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef(null);
+
+  const importXer = async (file) => {
+    if (!file) return;
+    setImporting(true);
+    const body = new FormData();
+    body.append("file", file);
+    try {
+      const { data } = await api.post("/projects/import/xer", body);
+      toast.success(
+        `Imported ${data.import_stats.activities} activities and ${data.import_stats.links} links`,
+      );
+      navigate(`/project/${data.id}`);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   const load = () =>
     api
@@ -82,6 +104,24 @@ export default function Dashboard() {
             </p>
             <h1 className="mt-2 text-4xl font-bold sm:text-5xl">Programmes</h1>
           </div>
+          <Button
+            data-testid="import-xer-button"
+            variant="outline"
+            className="rounded-sm"
+            onClick={() => fileRef.current?.click()}
+            disabled={importing}
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            {importing ? "Importing…" : "Import P6 XER"}
+          </Button>
+          <input
+            ref={fileRef}
+            data-testid="xer-file-input"
+            type="file"
+            accept=".xer,text/plain"
+            className="hidden"
+            onChange={(e) => importXer(e.target.files?.[0])}
+          />
           <Button
             data-testid="create-project-button"
             className="rounded-sm"
