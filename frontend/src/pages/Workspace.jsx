@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -10,6 +10,8 @@ import {
   Save,
   Sparkles,
   TrendingUp,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { api, downloadExport, errMsg } from "@/lib/api";
@@ -63,12 +65,21 @@ export default function Workspace() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [variance, setVariance] = useState(null);
   const [showVariance, setShowVariance] = useState(false);
+  const past = useRef([]);
+  const future = useRef([]);
+  const [historySize, setHistorySize] = useState([0, 0]);
+
+  const syncHistory = () =>
+    setHistorySize([past.current.length, future.current.length]);
 
   const ingest = useCallback((data) => {
     setProject(data);
     setActivities(data.activities || []);
     setSchedule(data.schedule || null);
     setDirty(false);
+    past.current = [];
+    future.current = [];
+    setHistorySize([0, 0]);
   }, []);
 
   const poll = useCallback(async () => {
@@ -128,7 +139,12 @@ export default function Workspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const recalc = async (next) => {
+  const recalc = async (next, { history = true } = {}) => {
+    if (history) {
+      past.current = [...past.current.slice(-49), stripComputed(activities)];
+      future.current = [];
+      syncHistory();
+    }
     setActivities(next);
     setDirty(true);
     try {
@@ -143,10 +159,50 @@ export default function Workspace() {
     }
   };
 
+  const undo = () => {
+    if (!past.current.length) return;
+    const prev = past.current.pop();
+    future.current = [stripComputed(activities), ...future.current.slice(0, 49)];
+    syncHistory();
+    recalc(prev, { history: false });
+    toast.success("Undone");
+  };
+
+  const redo = () => {
+    if (!future.current.length) return;
+    const next = future.current.shift();
+    past.current = [...past.current, stripComputed(activities)];
+    syncHistory();
+    recalc(next, { history: false });
+    toast.success("Redone");
+  };
+
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = (e.target?.tagName || "").toLowerCase();
+      if (["input", "select", "textarea"].includes(tag)) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activities]);
+
   const reorder = (fromId, toId) => {
     const from = activities.findIndex((a) => a.activity_id === fromId);
     const to = activities.findIndex((a) => a.activity_id === toId);
     if (from < 0 || to < 0) return;
+    past.current = [...past.current.slice(-49), stripComputed(activities)];
+    future.current = [];
+    syncHistory();
     const next = [...activities];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
@@ -165,12 +221,22 @@ export default function Workspace() {
     }
   };
 
-  const editCell = (visibleIndex, key, value) => {
-    const target = visible[visibleIndex];
+  const applyEdits = (edits) => {
+    if (!edits?.length) return;
+    const byId = {};
+    edits.forEach((e) => {
+      byId[e.activity_id] = { ...(byId[e.activity_id] || {}), [e.key]: e.value };
+    });
     const next = activities.map((a) =>
-      a.activity_id === target.activity_id ? { ...a, [key]: value } : a,
+      byId[a.activity_id] ? { ...a, ...byId[a.activity_id] } : a,
     );
     recalc(next);
+  };
+
+  const editCell = (visibleIndex, key, value) => {
+    const target = visible[visibleIndex];
+    if (!target) return;
+    applyEdits([{ activity_id: target.activity_id, key, value }]);
   };
 
   const addActivity = () => {
@@ -304,6 +370,26 @@ export default function Workspace() {
         )}
 
         <div className="ml-auto flex items-center gap-1">
+          <div className="mr-1 flex border border-border">
+            <button
+              data-testid="undo-button"
+              disabled={!historySize[0]}
+              onClick={undo}
+              title="Undo (Ctrl+Z)"
+              className="px-2 py-1.5 transition-colors hover:bg-[hsl(var(--surface))] disabled:opacity-30"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              data-testid="redo-button"
+              disabled={!historySize[1]}
+              onClick={redo}
+              title="Redo (Ctrl+Shift+Z)"
+              className="border-l border-border px-2 py-1.5 transition-colors hover:bg-[hsl(var(--surface))] disabled:opacity-30"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
           <Select value={stageFilter} onValueChange={setStageFilter}>
             <SelectTrigger
               data-testid="stage-filter"
@@ -501,7 +587,7 @@ export default function Workspace() {
                   activities={visible}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
-                  onEdit={editCell}
+                  onApplyEdits={applyEdits}
                   onAdd={addActivity}
                   onDelete={deleteActivity}
                   onReorder={reorder}

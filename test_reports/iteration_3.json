@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 3 frontend-only pass on the seeded Riverside Tower project (ed60c71a-2483-4e54-b062-e9414efe35ce). All new spreadsheet-style range editing and undo/redo features work end-to-end. Verified: single-click cell selection + Shift+click rectangular range (highlighted via ring-1 class); keyboard nav (Arrow moves, Shift+Arrow extends); Enter/F2 opens editor; printable-char typing starts edit pre-filled with that char; Ctrl+D fills the top row's value down the selected range and UNSAVED indicator appears; multi-row anchor commit (Enter after fill triggers same value on all rows in range); Delete/Backspace clears editable cells to 0/blank and read-only Successors column is untouched; Ctrl+C shows 'Copied N row(s)' toast; TSV paste event with '88\\n99' correctly writes to two rows and shows 'Pasted 2 row(s)' toast; invalid predecessor paste shows 'Invalid link syntax' error toast and does NOT corrupt the target cell; toolbar undo-button/redo-button disabled at load, enable after edits, disable again after Save; Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z drive undo & redo (verified on Ctrl+D fill, Delete clear, row reorder); Save clears past+future history (both buttons disabled again). Regressions: add-activity-button appends a Z-prefixed row, delete-row-{id} removes it, stage-filter dropdown hides drag handles (reorderEnabled=false), zoom day/week/month, calendar-button opens CalendarDialog, variance-button opens VarianceDialog, theme-toggle swaps html.class dark<->light, versions-button lists 6 snapshots. Backend pytest smoke: 34/34 passed (excluded test_ai.py per brief).\n\nMinor UX bug: onPaste() in DataGrid.jsx unconditionally calls toast.success after apply(); when the paste text fails parseValue (e.g. invalid predecessor syntax) BOTH the 'Invalid link syntax' error toast and 'Pasted 1 row(s)' success toast are shown together. Data is not corrupted (fix applied inside apply()'s try/catch), but the double toast is confusing.\n\nSkills loaded: ai-testing-core — AI generation/refinement NOT re-run this iteration per review-request directive (already verified iterations 1-2, 2-3 min single-concurrency).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "DataGrid.onPaste",
+        "issue": "When a paste contains invalid content (e.g. malformed predecessors), the 'Invalid link syntax' error toast and the 'Pasted N row(s)' success toast are BOTH shown because toast.success runs after apply() regardless of whether apply's try/catch swallowed a validation error. Cell values are correctly protected (unchanged), but the mixed toast messaging is misleading. Recommendation: track whether apply() succeeded and only fire the success toast when at least one edit landed, or move the success toast inside apply() on the happy path.",
+        "selector": "DataGrid.jsx lines 151-169 (onPaste), 93-102 (apply)",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "critical_code_review_comments": [
+    "DataGrid.onPaste: toast.success('Pasted N row(s)') fires even when apply() catches a validation error, producing a false-positive success next to the error toast. Guard the toast on the result of apply().",
+    "DataGrid.onKeyDown Ctrl+D: fills sel.r1+1..r2 with cellValue(activities[range.r1], col). Uses the visually-top row of the range as the source regardless of the drag direction, which is the expected spreadsheet convention. Note: for milestone rows the backend correctly clamps duration to 0 after recalc — this is not a UI bug but worth documenting so users aren't surprised when a filled '55' shows as '0' on a milestone (e.g. A1040).",
+    "Workspace.jsx window keydown effect re-registers on every activities change; effect deps only lists implicit activities via undo/redo closures. useCallback-wrapped undo/redo would let you drop the eslint-disable comment and make behaviour more predictable under React strict mode.",
+    "Workspace.jsx reorder() pushes onto past.current before mutating activities but does NOT call recalc — it only sets local activities+dirty. That means dates/float shown after a drag are stale until the next edit. To match the 'schedule recalculates' promise for reorder in the review request, consider passing next through recalc(next,{history:false}) after the push (the drag itself doesn't change logic, but stripComputed order might affect predecessor lookup order in the backend if any).",
+    "Workspace.jsx dirty flag persists even after an undo that returns activities exactly to their pre-edit state (dirty is only cleared inside ingest()). Cosmetic: UNSAVED indicator remains lit after full-loop undo. Consider clearing dirty when past.current becomes empty and current activities equal the last-ingested snapshot.",
+    "DataGrid.onKeyDown treats mod+key as 'typing char' filter last (if (!mod && !e.altKey && e.key.length === 1)). Good. But it doesn't handle Ctrl+A (select all rows/cols) — a common spreadsheet expectation.",
+    "DataGrid draft-input onKeyDown stops propagation for every key (e.stopPropagation()), preventing Escape/Enter from bubbling to any parent handlers — correct."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/",
+    "/app/test_reports/pytest/iter3_smoke.xml"
+  ],
+  "action_items": [
+    "(Low) DataGrid.jsx onPaste: only show 'Pasted N row(s)' toast on success — currently fires alongside the parseValue error toast on invalid paste content.",
+    "(Optional / cosmetic) Workspace.jsx: clear dirty flag when undo returns to the last-saved snapshot; call recalc after row reorder so the schedule/float reflects the new order immediately.",
+    "(Optional) Consider adding Ctrl+A range-select and Escape-to-clear-selection to round out the spreadsheet UX."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (34/34 pytest smoke, AI suite skipped per brief)", "frontend": "100% (all iteration-3 grid/undo behaviours + all regression flows pass; 1 low-severity double-toast on invalid paste)"},
+  "test_credentials": "planner@test.com / Test1234 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Reused seeded project ed60c71a-2483-4e54-b062-e9414efe35ce (Riverside Tower, 73 activities). All destructive edits were undone or Save-reverted; the final Save-cycle wrote back the original description for A1120. Later reorder + description edits in the last runs were left UNSAVED (never Save-clicked) so the persisted backend state is unchanged. Verified header still reads: 73 activities · 650wd · 2026-09-01 → 2029-03-23 · 20 critical · v6.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "New iteration-3 data-testids: cellbox-{colKey}-{activityId} (td, click / shift-click / double-click target), cell-{colKey}-{activityId} (input/select in edit mode), undo-button, redo-button. Grid onKeyDown fires only when the grid div OR a cell has focus; the Workspace window keydown listener catches Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z globally (unless target is INPUT/SELECT/TEXTAREA). Paste is best simulated by dispatching a ClipboardEvent with DataTransfer('text/plain', 'a\\tb\\nc\\td') on the grid element rather than typing into an input. Clipboard permission (clipboard-read/write) must be granted via ctx.grant_permissions for navigator.clipboard writes to succeed silently. Ctrl+D fill leaves milestone rows at duration 0 because the backend recalculate step clamps milestone.duration=0 — this is correct product behaviour, not a bug. Backend pytest suite (34 tests) still fully green and takes ~5s.",
+  "rca_of_the_issue": "The double-toast on invalid paste happens because DataGrid.onPaste does apply(edits) followed by an unconditional toast.success('Pasted N row(s)'). apply() internally catches any parseValue error via try/catch and shows toast.error(err.message), so the caller has no return value to test. Fix: make apply() return a boolean (or the number of successful edits) and gate the success toast on that, e.g. `const applied = apply(edits); if (applied) toast.success(...);`."
+}
