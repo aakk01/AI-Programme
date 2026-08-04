@@ -42,12 +42,17 @@ Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CP
 - Fixed: PATCH /projects/{id} partial inputs no longer wipes unspecified fields; grid uses fixed layout so all columns including Float fit on screen
 - 34/34 backend pytest, full frontend E2E pass
 
+### Iteration 3 (2026-06)
+- **Undo/redo**: 50-step history over every grid mutation (cell edits, range fills, paste, clear, add, delete, row reorder) with toolbar buttons and Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y; history resets on save, version restore and AI change application
+- **Range editing**: click + Shift+click rectangular selection, Ctrl+A select all, Escape to clear, arrow / Shift+arrow navigation, Enter or F2 or direct typing to edit, Ctrl+D fill down, Ctrl+C copy as TSV, TSV paste from Excel/P6, Delete to clear — read-only columns are never written and every batch is validated before it hits the CPM engine
+- Row reorder now reschedules immediately; the UNSAVED flag clears when undo returns to the last-saved state
+- 34/34 backend pytest, full frontend E2E pass
+
 ## Backlog
 ### P0
 - Stale "running" generation recovery if the pod restarts mid-generation (heartbeat timestamp)
 ### P1
 - Baseline vs current comparison view (variance bars against a snapshot)
-- Multi-select / copy-paste ranges in the grid; undo-redo
 - Asta Powerproject XML export; XER round-trip import
 - Calendar per activity (e.g. 7-day for concrete cure, 5-day for trades)
 ### P2
@@ -58,4 +63,4 @@ Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CP
 ## Next tasks
 1. Baseline vs current comparison against a saved snapshot
 2. Per-activity calendars
-3. Undo/redo + range editing in the grid
+3. Asta Powerproject XML export / XER import

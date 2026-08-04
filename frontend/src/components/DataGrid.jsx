@@ -91,13 +91,15 @@ export const DataGrid = ({
   };
 
   const apply = (edits) => {
-    if (!edits.length) return;
+    if (!edits.length) return false;
     try {
       onApplyEdits(
         edits.map((e) => ({ ...e, value: parseValue(e.key, e.value) })),
       );
+      return true;
     } catch (err) {
       toast.error(err.message);
+      return false;
     }
   };
 
@@ -164,9 +166,7 @@ export const DataGrid = ({
         edits.push({ activity_id: a.activity_id, key: col.key, value: raw });
       });
     });
-    apply(edits);
-    toast.success(`Pasted ${rows.length} row(s)`);
-  };
+    if (apply(edits)) toast.success(`Pasted ${rows.length} row(s)`);  };
 
   const onKeyDown = (e) => {
     if (draft || !sel) return;
@@ -180,6 +180,14 @@ export const DataGrid = ({
     };
     const mod = e.ctrlKey || e.metaKey;
 
+    if (e.key === "Escape") {
+      setSel(null);
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      return setSel({ r1: 0, c1: 0, r2: activities.length - 1, c2: COLS.length - 1 });
+    }
     if (e.key === "ArrowDown") return move(1, 0);
     if (e.key === "ArrowUp") return move(-1, 0);
     if (e.key === "ArrowRight") return move(0, 1);

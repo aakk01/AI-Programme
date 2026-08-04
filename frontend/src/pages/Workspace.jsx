@@ -165,6 +165,7 @@ export default function Workspace() {
     future.current = [stripComputed(activities), ...future.current.slice(0, 49)];
     syncHistory();
     recalc(prev, { history: false });
+    if (!past.current.length) setDirty(false);
     toast.success("Undone");
   };
 
@@ -206,8 +207,7 @@ export default function Workspace() {
     const next = [...activities];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    setActivities(next);
-    setDirty(true);
+    recalc(next, { history: false });
   };
 
   const openVariance = async () => {
