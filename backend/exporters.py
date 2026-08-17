@@ -150,37 +150,60 @@ def to_asta_xml(project_name: str, project_start: str, activities, calendar=None
             f"<ExtendedAttribute><FieldID>{WBS_FIELD_ID}</FieldID>"
             f"<Value>{escape(str(r['wbs']))}</Value></ExtendedAttribute>"
         )
-        extra = ""
+        preds = ""
+        critical_el = ""
+        slack_el = ""
+        constraint = "<ConstraintType>0</ConstraintType>"
+        notes = ""
         if a is not None:
             ctype = (a.get("constraint_type") or "").upper()
             cdate = a.get("constraint_date")
-            extra = (
+            constraint = (
                 f"<ConstraintType>{MSP_CONSTRAINT.get(ctype, 0)}</ConstraintType>"
                 + (f"<ConstraintDate>{_dt(cdate)}</ConstraintDate>" if ctype and cdate else "")
-                + f"<TotalSlack>{int(a.get('total_float') or 0) * 4800}</TotalSlack>"
-                + f"<FreeSlack>{int(a.get('free_float') or 0) * 4800}</FreeSlack>"
-                + f"<Critical>{1 if a.get('critical') else 0}</Critical>"
-                + f"<Notes>{escape(a['activity_id'])}</Notes>"
-                + _task_links(a, uid)
             )
+            critical_el = f"<Critical>{1 if a.get('critical') else 0}</Critical>"
+            slack_el = (
+                f"<FreeSlack>{int(a.get('free_float') or 0) * 4800}</FreeSlack>"
+                f"<TotalSlack>{int(a.get('total_float') or 0) * 4800}</TotalSlack>"
+            )
+            notes = f"<Notes>{escape(a['activity_id'])}</Notes>"
+            preds = _task_links(a, uid)
+        # Element order matches the MSP XSD; Asta ingests MSP XML and will drop
+        # fields (including Duration) if elements appear out of sequence.
         task_xml.append(f"""    <Task>
       <UID>{r['uid']}</UID>
       <ID>{r['id']}</ID>
       <Name>{escape(str(r['name']))}</Name>
       <Type>1</Type>
-      <Active>1</Active>
-      <Manual>0</Manual>
-      <OutlineLevel>{r['level']}</OutlineLevel>
-      <OutlineNumber>{r['wbs']}</OutlineNumber>
+      <IsNull>0</IsNull>
+      {notes}
       <WBS>{escape(str(r['wbs']))}</WBS>
-      <Milestone>{r['milestone']}</Milestone>
-      <Summary>{r['summary']}</Summary>
+      <OutlineNumber>{r['wbs']}</OutlineNumber>
+      <OutlineLevel>{r['level']}</OutlineLevel>
+      <Priority>500</Priority>
       <Start>{_dt(r['start'])}</Start>
       <Finish>{_dt(r['finish'], end=True)}</Finish>
       <Duration>PT{int(r['duration']) * 8}H0M0S</Duration>
       <DurationFormat>7</DurationFormat>
-      <CalendarUID>1</CalendarUID>
-      {ext}{extra}
+      <Work>PT{int(r['duration']) * 8}H0M0S</Work>
+      <EffortDriven>0</EffortDriven>
+      <Estimated>0</Estimated>
+      <Milestone>{r['milestone']}</Milestone>
+      <Summary>{r['summary']}</Summary>
+      {critical_el}
+      <IsSubproject>0</IsSubproject>
+      {slack_el}
+      <FixedCost>0</FixedCost>
+      <FixedCostAccrual>3</FixedCostAccrual>
+      <PercentComplete>0</PercentComplete>
+      <PercentWorkComplete>0</PercentWorkComplete>
+      {constraint}
+      <CalendarUID>-1</CalendarUID>
+      <Manual>0</Manual>
+      <Active>1</Active>
+      {ext}
+      {preds}
     </Task>""")
 
     finish = max([str(r["finish"]) for r in rows] or [project_start])
@@ -253,23 +276,47 @@ def to_msproject_xml(project_name: str, project_start: str, activities, calendar
         constraint = f"<ConstraintType>{MSP_CONSTRAINT.get(ctype, 0)}</ConstraintType>" + (
             f"<ConstraintDate>{_dt(cdate)}</ConstraintDate>" if ctype and cdate else ""
         )
+        outline_level = 1 if atype == "Summary" else 3
+        wbs_code = a.get("wbs_code") or ""
+        # Element order MUST follow the MSP XSD or MSP silently drops fields
+        # (notably Duration → shows as 0d in every task).
         rows.append(f"""    <Task>
       <UID>{uid[a['activity_id']]}</UID>
       <ID>{i + 1}</ID>
       <Name>{escape(str(a.get('description') or a['activity_id']))}</Name>
       <Type>1</Type>
-      <OutlineLevel>{3 if atype != 'Summary' else 1}</OutlineLevel>
-      <WBS>{escape(str(a.get('wbs_code') or ''))}</WBS>
-      <Milestone>{1 if atype == 'Milestone' else 0}</Milestone>
-      <Summary>{1 if atype == 'Summary' else 0}</Summary>
-      <Critical>{1 if a.get('critical') else 0}</Critical>
+      <IsNull>0</IsNull>
+      <WBS>{escape(str(wbs_code))}</WBS>
+      <OutlineNumber>{escape(str(wbs_code))}</OutlineNumber>
+      <OutlineLevel>{outline_level}</OutlineLevel>
+      <Priority>500</Priority>
       <Start>{_dt(a.get('start') or project_start)}</Start>
       <Finish>{_dt(a.get('finish') or project_start, end=True)}</Finish>
       <Duration>PT{dur * 8}H0M0S</Duration>
       <DurationFormat>7</DurationFormat>
-      <TotalSlack>{int(a.get('total_float') or 0) * 4800}</TotalSlack>
+      <Work>PT{dur * 8}H0M0S</Work>
+      <EffortDriven>0</EffortDriven>
+      <Estimated>0</Estimated>
+      <Milestone>{1 if atype == 'Milestone' else 0}</Milestone>
+      <Summary>{1 if atype == 'Summary' else 0}</Summary>
+      <Critical>{1 if a.get('critical') else 0}</Critical>
+      <IsSubproject>0</IsSubproject>
       <FreeSlack>{int(a.get('free_float') or 0) * 4800}</FreeSlack>
-      {constraint}{preds}
+      <TotalSlack>{int(a.get('total_float') or 0) * 4800}</TotalSlack>
+      <FixedCost>0</FixedCost>
+      <FixedCostAccrual>3</FixedCostAccrual>
+      <PercentComplete>0</PercentComplete>
+      <PercentWorkComplete>0</PercentWorkComplete>
+      {constraint}
+      <CalendarUID>-1</CalendarUID>
+      <LevelAssignments>1</LevelAssignments>
+      <LevelingCanSplit>1</LevelingCanSplit>
+      <LevelingDelay>0</LevelingDelay>
+      <LevelingDelayFormat>8</LevelingDelayFormat>
+      <PreLeveledStart>{_dt(a.get('start') or project_start)}</PreLeveledStart>
+      <PreLeveledFinish>{_dt(a.get('finish') or project_start, end=True)}</PreLeveledFinish>
+      <Manual>0</Manual>
+      {preds}
     </Task>""")
 
     finish = max([str(a.get("finish") or "") for a in activities] or [project_start])

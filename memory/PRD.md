@@ -54,6 +54,9 @@ Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CP
 - Non-XER uploads are rejected with a clear message; the import is logged as an assumption entry
 - 51/51 backend pytest, full frontend E2E pass
 
+### Iteration 5 (2026-08) — Bug fix
+- **MSP XML export Duration=0 bug fixed**: `<Task>` element children in `to_msproject_xml` and `to_asta_xml` were being emitted in a non-XSD-compliant order (`Type→OutlineLevel→WBS→Milestone→Summary→Critical→Start→Finish→Duration...`). MS Project / Asta Powerproject follow strict XSD ordering and silently drop out-of-sequence elements — that's why every activity showed 0d. Reordered to `UID→ID→Name→Type→IsNull→WBS→OutlineNumber→OutlineLevel→Priority→Start→Finish→Duration→DurationFormat→Work→EffortDriven→Estimated→Milestone→Summary→Critical→FreeSlack→TotalSlack→FixedCost→...→ConstraintType→CalendarUID→Manual→PredecessorLink` and added the previously missing `<IsNull>`, `<Priority>`, `<Work>`, `<Manual>` fields. 10/10 export pytest pass; `/app/backend/tests/test_msp_export.py` asserts XSD ordering, non-zero duration for 10/15/20-day tasks (PT80H/PT120H/PT160H) and PT0H for milestones.
+
 ## Backlog
 ### P0
 - Stale "running" generation recovery if the pod restarts mid-generation (heartbeat timestamp)
