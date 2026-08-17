@@ -57,6 +57,14 @@ Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CP
 ### Iteration 5 (2026-08) — Bug fix
 - **MSP XML export Duration=0 bug fixed**: `<Task>` element children in `to_msproject_xml` and `to_asta_xml` were being emitted in a non-XSD-compliant order (`Type→OutlineLevel→WBS→Milestone→Summary→Critical→Start→Finish→Duration...`). MS Project / Asta Powerproject follow strict XSD ordering and silently drop out-of-sequence elements — that's why every activity showed 0d. Reordered to `UID→ID→Name→Type→IsNull→WBS→OutlineNumber→OutlineLevel→Priority→Start→Finish→Duration→DurationFormat→Work→EffortDriven→Estimated→Milestone→Summary→Critical→FreeSlack→TotalSlack→FixedCost→...→ConstraintType→CalendarUID→Manual→PredecessorLink` and added the previously missing `<IsNull>`, `<Priority>`, `<Work>`, `<Manual>` fields. 10/10 export pytest pass; `/app/backend/tests/test_msp_export.py` asserts XSD ordering, non-zero duration for 10/15/20-day tasks (PT80H/PT120H/PT160H) and PT0H for milestones.
 
+### Iteration 6 (2026-08) — Version Snapshots & Baseline Slippage View
+- **Snapshots API** (`server.py`): new `POST /api/projects/{id}/snapshots` (accepts `{name}`), `GET /snapshots`, `POST /snapshots/{sid}/restore`, `GET /snapshots/{sid}/compare`. Snapshots now capture calendar in addition to activities/assumptions/inputs. Legacy `/versions` endpoints retained for BC.
+- **Compare** endpoint reruns CPM on the snapshot to produce per-activity `{current_start, current_finish, baseline_start, baseline_finish, start_variance_days, finish_variance_days, duration_variance, in_baseline}` plus `added[]` / `removed[]` sets and project-level finish variance.
+- **Workspace UI**: replaced separate Snapshot / Versions buttons with a single **Snapshots (N)** dropdown → Save baseline snapshot… modal, Manage / restore snapshots dialog, Show BL columns toggle. New **Baseline selector** in the toolbar overlays a chosen snapshot.
+- **Gantt overlay** (`GanttChart.jsx`): slim baseline bar rendered beneath each current bar; colour graded red (slip > 5d) → amber (> 0d) → muted (no slip). New `workingDayOffset` helper converts baseline ISO dates → working-day offset from project start.
+- **DataGrid baseline columns** (`DataGrid.jsx`): optional BL Start / BL Finish / Var (d) columns, coloured cell for non-zero variance.
+- **Verified**: 7/7 snapshot pytest, 10/10 export regression, full Playwright E2E flow green (`/app/test_reports/iteration_6.json`).
+
 ## Backlog
 ### P0
 - Stale "running" generation recovery if the pod restarts mid-generation (heartbeat timestamp)

@@ -465,23 +465,40 @@ async def apply_changes(project_id: str, body: ApplyChangesBody,
     return with_schedule({**p, **updates})
 
 
-# ---------- versions ----------
-@api.post("/projects/{project_id}/versions")
-async def snapshot(project_id: str, body: dict = None, user_id: str = Depends(get_current_user_id)):
+# ---------- versions / snapshots ----------
+async def _save_snapshot(project_id: str, user_id: str, label: str | None) -> dict:
     p = await get_project(project_id, user_id)
     n = await db.versions.count_documents({"project_id": project_id})
     v = {
         "id": str(uuid.uuid4()),
         "project_id": project_id,
         "version": n + 1,
-        "label": (body or {}).get("label") or f"Version {n + 1}",
+        "label": (label or "").strip() or f"Snapshot {n + 1}",
         "activities": p.get("activities", []),
         "assumptions": p.get("assumptions", []),
         "inputs": p.get("inputs", {}),
+        "calendar": p.get("calendar", {}),
         "created_at": now_iso(),
     }
     await db.versions.insert_one(dict(v))
     await db.projects.update_one({"id": project_id}, {"$set": {"version": n + 1}})
+    return v
+
+
+def _snapshot_summary(v: dict) -> dict:
+    return {
+        "id": v["id"],
+        "version": v.get("version"),
+        "label": v.get("label"),
+        "created_at": v.get("created_at"),
+        "activity_count": len(v.get("activities", [])),
+    }
+
+
+@api.post("/projects/{project_id}/versions")
+async def snapshot(project_id: str, body: dict = None,
+                   user_id: str = Depends(get_current_user_id)):
+    v = await _save_snapshot(project_id, user_id, (body or {}).get("label"))
     return {k: v[k] for k in ("id", "version", "label", "created_at")}
 
 
@@ -489,9 +506,7 @@ async def snapshot(project_id: str, body: dict = None, user_id: str = Depends(ge
 async def list_versions(project_id: str, user_id: str = Depends(get_current_user_id)):
     await get_project(project_id, user_id)
     rows = await db.versions.find({"project_id": project_id}, NO_ID).sort("version", -1).to_list(100)
-    return [{"id": r["id"], "version": r["version"], "label": r["label"],
-             "created_at": r["created_at"], "activity_count": len(r.get("activities", []))}
-            for r in rows]
+    return [_snapshot_summary(r) for r in rows]
 
 
 @api.post("/projects/{project_id}/versions/{version_id}/restore")
@@ -500,11 +515,104 @@ async def restore_version(project_id: str, version_id: str,
     p = await get_project(project_id, user_id)
     v = await db.versions.find_one({"id": version_id, "project_id": project_id}, NO_ID)
     if not v:
-        raise HTTPException(status_code=404, detail="Version not found")
-    updates = {"activities": v["activities"], "assumptions": v.get("assumptions", []),
-               "inputs": v.get("inputs", p.get("inputs", {})), "updated_at": now_iso()}
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    updates = {
+        "activities": v["activities"],
+        "assumptions": v.get("assumptions", []),
+        "inputs": v.get("inputs", p.get("inputs", {})),
+        "calendar": v.get("calendar", p.get("calendar", {})),
+        "updated_at": now_iso(),
+    }
     await db.projects.update_one({"id": project_id}, {"$set": updates})
     return with_schedule({**p, **updates})
+
+
+# --- Snapshot aliases (same underlying `versions` collection, richer API) ---
+@api.post("/projects/{project_id}/snapshots")
+async def create_snapshot(project_id: str, body: dict = None,
+                          user_id: str = Depends(get_current_user_id)):
+    v = await _save_snapshot(project_id, user_id, (body or {}).get("name")
+                             or (body or {}).get("label"))
+    return _snapshot_summary(v)
+
+
+@api.get("/projects/{project_id}/snapshots")
+async def list_snapshots(project_id: str, user_id: str = Depends(get_current_user_id)):
+    await get_project(project_id, user_id)
+    rows = (await db.versions.find({"project_id": project_id}, NO_ID)
+            .sort("version", -1).to_list(100))
+    return [_snapshot_summary(r) for r in rows]
+
+
+@api.post("/projects/{project_id}/snapshots/{snapshot_id}/restore")
+async def restore_snapshot(project_id: str, snapshot_id: str,
+                           user_id: str = Depends(get_current_user_id)):
+    return await restore_version(project_id, snapshot_id, user_id)
+
+
+def _diff_days(current: str | None, baseline: str | None) -> int | None:
+    if not current or not baseline:
+        return None
+    try:
+        return (date.fromisoformat(str(current)[:10])
+                - date.fromisoformat(str(baseline)[:10])).days
+    except ValueError:
+        return None
+
+
+@api.get("/projects/{project_id}/snapshots/{snapshot_id}/compare")
+async def compare_snapshot(project_id: str, snapshot_id: str,
+                           user_id: str = Depends(get_current_user_id)):
+    p = await get_project(project_id, user_id)
+    snap = await db.versions.find_one({"id": snapshot_id, "project_id": project_id}, NO_ID)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    current = schedule(p)
+    baseline_project = {
+        "inputs": snap.get("inputs", p.get("inputs", {})),
+        "activities": snap.get("activities", []),
+        "calendar": snap.get("calendar", p.get("calendar", {})),
+    }
+    baseline = schedule(baseline_project)
+
+    by_id = {a["activity_id"]: a for a in baseline["activities"]}
+    rows = []
+    for a in current["activities"]:
+        b = by_id.get(a["activity_id"])
+        row = {
+            "activity_id": a["activity_id"],
+            "description": a.get("description", ""),
+            "current_start": a.get("start"),
+            "current_finish": a.get("finish"),
+            "current_duration": a.get("duration", 0),
+            "baseline_start": b.get("start") if b else None,
+            "baseline_finish": b.get("finish") if b else None,
+            "baseline_duration": b.get("duration", 0) if b else None,
+            "start_variance_days": _diff_days(a.get("start"), b.get("start") if b else None),
+            "finish_variance_days": _diff_days(a.get("finish"), b.get("finish") if b else None),
+            "duration_variance": (a.get("duration", 0) - b.get("duration", 0)) if b else None,
+            "in_baseline": b is not None,
+        }
+        rows.append(row)
+
+    added = [a["activity_id"] for a in current["activities"]
+             if a["activity_id"] not in by_id]
+    current_ids = {a["activity_id"] for a in current["activities"]}
+    removed = [{"activity_id": bid, "description": ba.get("description", ""),
+                "baseline_start": ba.get("start"), "baseline_finish": ba.get("finish")}
+               for bid, ba in by_id.items() if bid not in current_ids]
+
+    return {
+        "snapshot": _snapshot_summary(snap),
+        "current_finish": current.get("project_finish"),
+        "baseline_finish": baseline.get("project_finish"),
+        "finish_variance_days": _diff_days(current.get("project_finish"),
+                                           baseline.get("project_finish")),
+        "rows": rows,
+        "added": added,
+        "removed": removed,
+    }
 
 
 # ---------- exports ----------

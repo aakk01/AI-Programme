@@ -19,12 +19,26 @@ const COLS = [
   { key: "total_float", label: "Float", w: "w-[52px]", ro: true, num: true },
 ];
 
+const BASELINE_COLS = [
+  { key: "baseline_start", label: "BL Start", w: "w-[100px]", ro: true, baseline: true },
+  { key: "baseline_finish", label: "BL Finish", w: "w-[100px]", ro: true, baseline: true },
+  { key: "finish_variance_days", label: "Var (d)", w: "w-[64px]", ro: true, num: true, baseline: true },
+];
+
 const TYPES = ["Task", "Milestone", "Summary"];
 const CONSTRAINTS = ["", "SNET", "FNLT", "MSO"];
 const SELECTS = { type: TYPES, constraint_type: CONSTRAINTS };
 
-const cellValue = (a, key) =>
-  key === "predecessors" ? formatLinks(a.predecessors) : (a[key] ?? "");
+const cellValue = (a, key, baseline) => {
+  if (key === "predecessors") return formatLinks(a.predecessors);
+  if (key === "baseline_start") return baseline?.baseline_start ?? "—";
+  if (key === "baseline_finish") return baseline?.baseline_finish ?? "—";
+  if (key === "finish_variance_days") {
+    const v = baseline?.finish_variance_days;
+    return v == null ? "—" : (v > 0 ? `+${v}` : `${v}`);
+  }
+  return a[key] ?? "";
+};
 
 const parseValue = (key, raw) => {
   if (key === "predecessors") return parseLinks(raw);
@@ -64,11 +78,15 @@ export const DataGrid = ({
   onReorder,
   reorderEnabled = true,
   rowHeight = 26,
+  baselineByActivity = {},
+  showBaselineCols = false,
 }) => {
   const [draft, setDraft] = useState(null);
   const [dragId, setDragId] = useState(null);
   const [sel, setSel] = useState(null);
   const wrapRef = useRef(null);
+
+  const cols = showBaselineCols ? [...COLS, ...BASELINE_COLS] : COLS;
 
   useEffect(() => {
     if (sel && sel.r2 >= activities.length) setSel(null);
@@ -78,7 +96,7 @@ export const DataGrid = ({
     const out = [];
     for (let r = range.r1; r <= range.r2; r += 1) {
       for (let c = range.c1; c <= range.c2; c += 1) {
-        const col = COLS[c];
+        const col = cols[c];
         if (col.ro) continue;
         const a = activities[r];
         if (!a) continue;
@@ -120,7 +138,7 @@ export const DataGrid = ({
   };
 
   const startEdit = (r, c, initial) => {
-    const col = COLS[c];
+    const col = cols[c];
     if (col.ro) return;
     setDraft({
       r,
@@ -142,7 +160,7 @@ export const DataGrid = ({
     for (let r = range.r1; r <= range.r2; r += 1) {
       const cells = [];
       for (let c = range.c1; c <= range.c2; c += 1)
-        cells.push(String(cellValue(activities[r], COLS[c].key)));
+        cells.push(String(cellValue(activities[r], cols[c].key)));
       rows.push(cells.join("\t"));
     }
     const text = rows.join("\n");
@@ -161,7 +179,7 @@ export const DataGrid = ({
     rows.forEach((cells, ri) => {
       cells.forEach((raw, ci) => {
         const a = activities[r1 + ri];
-        const col = COLS[c1 + ci];
+        const col = cols[c1 + ci];
         if (!a || !col || col.ro) return;
         edits.push({ activity_id: a.activity_id, key: col.key, value: raw });
       });
@@ -174,7 +192,7 @@ export const DataGrid = ({
     const move = (dr, dc) => {
       e.preventDefault();
       const r = Math.max(0, Math.min(activities.length - 1, sel.r2 + dr));
-      const c = Math.max(0, Math.min(COLS.length - 1, sel.c2 + dc));
+      const c = Math.max(0, Math.min(cols.length - 1, sel.c2 + dc));
       if (e.shiftKey) setSel({ ...sel, r2: r, c2: c });
       else selectCell(r, c, false);
     };
@@ -186,7 +204,7 @@ export const DataGrid = ({
     }
     if (mod && e.key.toLowerCase() === "a") {
       e.preventDefault();
-      return setSel({ r1: 0, c1: 0, r2: activities.length - 1, c2: COLS.length - 1 });
+      return setSel({ r1: 0, c1: 0, r2: activities.length - 1, c2: cols.length - 1 });
     }
     if (e.key === "ArrowDown") return move(1, 0);
     if (e.key === "ArrowUp") return move(-1, 0);
@@ -200,13 +218,13 @@ export const DataGrid = ({
       e.preventDefault();
       return apply(
         editsFor({ ...range, r1: range.r1 + 1 }, (r, c) =>
-          String(cellValue(activities[range.r1], COLS[c].key)),
+          String(cellValue(activities[range.r1], cols[c].key)),
         ),
       );
     }
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
-      return apply(editsFor(range, (r, c) => String(blankFor(COLS[c].key))));
+      return apply(editsFor(range, (r, c) => String(blankFor(cols[c].key))));
     }
     if (e.key === "Enter" || e.key === "F2") {
       e.preventDefault();
@@ -244,7 +262,7 @@ export const DataGrid = ({
             <th className="w-8 border-b border-r border-border px-1 py-1.5 font-mono-data text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               #
             </th>
-            {COLS.map((c) => (
+            {cols.map((c) => (
               <th
                 key={c.key}
                 className={`${c.w} border-b border-r border-border px-2 py-1.5 font-mono-data text-[10px] font-medium uppercase tracking-wider text-muted-foreground ${c.num ? "text-right" : ""}`}
@@ -283,9 +301,20 @@ export const DataGrid = ({
                     />
                   )}
                 </td>
-                {COLS.map((c, ci) => {
+                {cols.map((c, ci) => {
                   const editing = draft && draft.r === i && draft.key === c.key;
                   const selected = inRange(i, ci);
+                  const bl = baselineByActivity[a.activity_id];
+                  const varDays =
+                    c.key === "finish_variance_days" ? bl?.finish_variance_days : null;
+                  const varColor =
+                    varDays == null
+                      ? ""
+                      : varDays > 0
+                        ? "font-semibold text-[hsl(var(--bar-critical))]"
+                        : varDays < 0
+                          ? "font-semibold text-[hsl(var(--bar))]"
+                          : "";
                   return (
                     <td
                       key={c.key}
@@ -297,9 +326,11 @@ export const DataGrid = ({
                       } ${selected ? "bg-[hsl(var(--bar))]/20 ring-1 ring-inset ring-[hsl(var(--ring))]/40" : ""} ${
                         c.key === "total_float" && a.critical
                           ? "font-semibold text-[hsl(var(--bar-critical))]"
-                          : c.ro
-                            ? "text-muted-foreground"
-                            : ""
+                          : c.baseline
+                            ? `bg-[hsl(var(--surface))]/60 ${varColor || "text-muted-foreground"}`
+                            : c.ro
+                              ? "text-muted-foreground"
+                              : ""
                       }`}
                     >
                       {editing ? (
@@ -348,7 +379,7 @@ export const DataGrid = ({
                               {a.description}
                             </span>
                           ) : (
-                            cellValue(a, c.key)
+                            cellValue(a, c.key, bl)
                           )}
                         </span>
                       )}

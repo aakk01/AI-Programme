@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   CalendarCog,
   ClipboardList,
+  Columns3,
   Download,
   History,
   Save,
@@ -17,10 +18,12 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { api, downloadExport, errMsg } from "@/lib/api";
 import { stripComputed } from "@/lib/links";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -33,6 +36,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -61,7 +65,13 @@ export default function Workspace() {
   const [selectedId, setSelectedId] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [showAssumptions, setShowAssumptions] = useState(false);
-  const [versions, setVersions] = useState(null);
+  const [snapshots, setSnapshots] = useState([]);
+  const [showSnapshots, setShowSnapshots] = useState(false);
+  const [showSaveSnapshot, setShowSaveSnapshot] = useState(false);
+  const [snapshotName, setSnapshotName] = useState("");
+  const [baselineId, setBaselineId] = useState("__none__");
+  const [baselineData, setBaselineData] = useState(null);
+  const [showBaselineCols, setShowBaselineCols] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [variance, setVariance] = useState(null);
   const [showVariance, setShowVariance] = useState(false);
@@ -286,36 +296,79 @@ export default function Workspace() {
     }
   };
 
-  const snapshot = async () => {
+  const loadSnapshots = useCallback(async () => {
     try {
-      const { data } = await api.post(`/projects/${id}/versions`, {});
-      toast.success(`Snapshot saved as ${data.label}`);
+      const { data } = await api.get(`/projects/${id}/snapshots`);
+      setSnapshots(data);
+      return data;
+    } catch (e) {
+      toast.error(errMsg(e));
+      return [];
+    }
+  }, [id]);
+
+  const saveSnapshot = async () => {
+    try {
+      const name = snapshotName.trim();
+      const { data } = await api.post(`/projects/${id}/snapshots`, { name });
+      toast.success(`Snapshot saved: ${data.label}`);
+      setShowSaveSnapshot(false);
+      setSnapshotName("");
+      await loadSnapshots();
     } catch (e) {
       toast.error(errMsg(e));
     }
   };
 
-  const openVersions = async () => {
-    try {
-      const { data } = await api.get(`/projects/${id}/versions`);
-      setVersions(data);
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
+  const openSnapshots = async () => {
+    await loadSnapshots();
+    setShowSnapshots(true);
   };
 
-  const restore = async (versionId) => {
+  const restore = async (snapshotId) => {
     try {
       const { data } = await api.post(
-        `/projects/${id}/versions/${versionId}/restore`,
+        `/projects/${id}/snapshots/${snapshotId}/restore`,
       );
       ingest(data);
-      setVersions(null);
-      toast.success("Version restored");
+      setShowSnapshots(false);
+      toast.success("Snapshot restored");
     } catch (e) {
       toast.error(errMsg(e));
     }
   };
+
+  useEffect(() => {
+    if (baselineId === "__none__") {
+      setBaselineData(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get(`/projects/${id}/snapshots/${baselineId}/compare`)
+      .then(({ data }) => {
+        if (!cancelled) setBaselineData(data);
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(errMsg(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baselineId, id, activities]);
+
+  useEffect(() => {
+    if (project) loadSnapshots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id]);
+
+  const baselineByActivity = useMemo(() => {
+    const map = {};
+    (baselineData?.rows || []).forEach((r) => {
+      map[r.activity_id] = r;
+    });
+    return map;
+  }, [baselineData]);
 
   const stages = useMemo(
     () => [...new Set(activities.map((a) => a.wbs_l1).filter(Boolean))],
@@ -456,25 +509,61 @@ export default function Workspace() {
             Assumptions ({(project?.assumptions || []).length})
           </Button>
 
-          <Button
-            data-testid="versions-button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-sm text-xs"
-            onClick={openVersions}
-          >
-            <History className="mr-1.5 h-3.5 w-3.5" /> Versions
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                data-testid="snapshots-menu"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-sm text-xs"
+              >
+                <History className="mr-1.5 h-3.5 w-3.5" />
+                Snapshots{snapshots.length ? ` (${snapshots.length})` : ""}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-popover">
+              <DropdownMenuItem
+                data-testid="save-snapshot-menu"
+                onClick={() => {
+                  setSnapshotName("");
+                  setShowSaveSnapshot(true);
+                }}
+              >
+                Save baseline snapshot…
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="manage-snapshots-menu"
+                onClick={openSnapshots}
+              >
+                Manage / restore snapshots
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                data-testid="toggle-baseline-cols"
+                onClick={() => setShowBaselineCols((v) => !v)}
+              >
+                <Columns3 className="mr-2 h-3.5 w-3.5" />
+                {showBaselineCols ? "Hide" : "Show"} BL columns in grid
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <Button
-            data-testid="snapshot-button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-sm text-xs"
-            onClick={snapshot}
-          >
-            Snapshot
-          </Button>
+          <Select value={baselineId} onValueChange={setBaselineId}>
+            <SelectTrigger
+              data-testid="baseline-selector"
+              className="h-8 w-[180px] rounded-sm text-xs"
+            >
+              <SelectValue placeholder="No baseline" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">No baseline</SelectItem>
+              {snapshots.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -598,6 +687,8 @@ export default function Workspace() {
                   onDelete={deleteActivity}
                   onReorder={reorder}
                   reorderEnabled={stageFilter === "__all__"}
+                  baselineByActivity={baselineByActivity}
+                  showBaselineCols={showBaselineCols && baselineId !== "__none__"}
                 />
               </Panel>
               <PanelResizeHandle className="h-1.5 border-y border-border bg-[hsl(var(--surface))] transition-colors hover:bg-[hsl(var(--bar))]/40" />
@@ -610,6 +701,8 @@ export default function Workspace() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onDurationChange={changeDuration}
+                  baselineByActivity={baselineByActivity}
+                  baselineActive={baselineId !== "__none__"}
                 />
               </Panel>
             </PanelGroup>
@@ -674,40 +767,134 @@ export default function Workspace() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={versions !== null} onOpenChange={() => setVersions(null)}>
+      <Dialog open={showSnapshots} onOpenChange={setShowSnapshots}>
         <DialogContent className="max-w-lg rounded-sm bg-background">
           <DialogHeader>
-            <DialogTitle>Version history</DialogTitle>
+            <DialogTitle>Snapshots / baselines</DialogTitle>
           </DialogHeader>
-          <div data-testid="versions-list" className="space-y-px bg-border">
-            {(versions || []).map((v) => (
+          {baselineData && (
+            <div className="border-l-2 border-[hsl(var(--bar))] bg-[hsl(var(--surface))] px-3 py-2 text-xs">
+              <p className="font-mono-data text-[10px] uppercase tracking-wider text-muted-foreground">
+                Active baseline vs current
+              </p>
+              <p className="mt-1">
+                Baseline finish: <b>{baselineData.baseline_finish || "—"}</b> ·
+                Current finish: <b>{baselineData.current_finish || "—"}</b> ·
+                Δ{" "}
+                <span
+                  className={
+                    baselineData.finish_variance_days > 0
+                      ? "font-semibold text-[hsl(var(--bar-critical))]"
+                      : baselineData.finish_variance_days < 0
+                        ? "font-semibold text-[hsl(var(--bar))]"
+                        : ""
+                  }
+                >
+                  {baselineData.finish_variance_days ?? "—"} d
+                </span>
+              </p>
+            </div>
+          )}
+          <div data-testid="snapshots-list" className="space-y-px bg-border">
+            {snapshots.map((v) => (
               <div
                 key={v.id}
+                data-testid={`snapshot-row-${v.id}`}
                 className="flex items-center justify-between bg-background p-3"
               >
                 <div>
                   <p className="text-sm font-medium">{v.label}</p>
                   <p className="font-mono-data text-[10px] text-muted-foreground">
-                    {v.activity_count} activities · {String(v.created_at).slice(0, 16)}
+                    {v.activity_count} activities ·{" "}
+                    {String(v.created_at).slice(0, 16)}
                   </p>
                 </div>
-                <Button
-                  data-testid={`restore-${v.id}`}
-                  variant="outline"
-                  size="sm"
-                  className="h-7 rounded-sm text-xs"
-                  onClick={() => restore(v.id)}
-                >
-                  Restore
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    data-testid={`set-baseline-${v.id}`}
+                    variant="outline"
+                    size="sm"
+                    className="h-7 rounded-sm text-xs"
+                    onClick={() => {
+                      setBaselineId(v.id);
+                      setShowSnapshots(false);
+                      toast.success(`Baseline set to ${v.label}`);
+                    }}
+                  >
+                    Set as baseline
+                  </Button>
+                  <Button
+                    data-testid={`restore-${v.id}`}
+                    variant="outline"
+                    size="sm"
+                    className="h-7 rounded-sm text-xs"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Restore programme to "${v.label}"? Current unsaved edits will be replaced.`,
+                        )
+                      )
+                        restore(v.id);
+                    }}
+                  >
+                    Restore
+                  </Button>
+                </div>
               </div>
             ))}
-            {versions?.length === 0 && (
+            {snapshots.length === 0 && (
               <p className="bg-background p-3 text-sm text-muted-foreground">
-                No snapshots yet. Use “Snapshot” to capture the current baseline.
+                No snapshots yet. Use “Save baseline snapshot” to capture the
+                current state.
               </p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSaveSnapshot} onOpenChange={setShowSaveSnapshot}>
+        <DialogContent className="max-w-md rounded-sm bg-background">
+          <DialogHeader>
+            <DialogTitle>Save baseline snapshot</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <label className="block text-xs text-muted-foreground">
+              Name your snapshot (e.g. “Target Baseline Rev 0”, “Week 12 Update”)
+            </label>
+            <Input
+              autoFocus
+              data-testid="snapshot-name-input"
+              value={snapshotName}
+              onChange={(e) => setSnapshotName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveSnapshot();
+              }}
+              placeholder={`Snapshot ${snapshots.length + 1}`}
+              className="rounded-sm"
+            />
+            <p className="font-mono-data text-[10px] text-muted-foreground">
+              Captures the current activities and working calendar. Use the
+              baseline selector afterwards to compare progress against it.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-sm"
+              onClick={() => setShowSaveSnapshot(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              data-testid="save-snapshot-confirm"
+              size="sm"
+              className="rounded-sm"
+              onClick={saveSnapshot}
+            >
+              Save snapshot
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

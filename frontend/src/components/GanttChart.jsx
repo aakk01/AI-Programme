@@ -22,6 +22,26 @@ const addWorkingDays = (startIso, n, cal) => {
   return d;
 };
 
+// Working-day offset of an ISO date from projectStart (0 == projectStart).
+const workingDayOffset = (startIso, targetIso, cal) => {
+  if (!startIso || !targetIso) return null;
+  const working = WEEK_DAYS[cal?.week_pattern || "5-day"];
+  const holidays = new Set(cal?.holidays || []);
+  const ok = (d) => working.includes(d.getDay()) && !holidays.has(iso(d));
+  const start = new Date(`${startIso}T00:00:00Z`);
+  const target = new Date(`${targetIso}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(target.getTime())) return null;
+  const forward = target >= start;
+  let n = 0;
+  const d = new Date(start);
+  while (iso(d) !== iso(target)) {
+    d.setUTCDate(d.getUTCDate() + (forward ? 1 : -1));
+    if (ok(d)) n += forward ? 1 : -1;
+    if (Math.abs(n) > 20000) break;
+  }
+  return n;
+};
+
 const fmt = (d, zoom) =>
   zoom === "month"
     ? d.toLocaleDateString(undefined, { month: "short", year: "2-digit", timeZone: "UTC" })
@@ -39,6 +59,8 @@ export const GanttChart = ({
   selectedId,
   onSelect,
   onDurationChange,
+  baselineByActivity = {},
+  baselineActive = false,
 }) => {
   const px = PX[zoom];
   const [drag, setDrag] = useState(null);
@@ -271,6 +293,55 @@ export const GanttChart = ({
                 </g>
               );
             })}
+            {baselineActive &&
+              activities.map((a, i) => {
+                const bl = baselineByActivity[a.activity_id];
+                if (!bl || !bl.baseline_start || !bl.baseline_finish) return null;
+                const blStartOff = workingDayOffset(
+                  projectStart,
+                  bl.baseline_start,
+                  calendar,
+                );
+                const blFinOff = workingDayOffset(
+                  projectStart,
+                  bl.baseline_finish,
+                  calendar,
+                );
+                if (blStartOff == null || blFinOff == null) return null;
+                const bx = blStartOff * px;
+                const bw = Math.max(2, (blFinOff - blStartOff + 1) * px);
+                const by = i * rowHeight + rowHeight - 4;
+                const slip = bl.finish_variance_days ?? 0;
+                const slipColor =
+                  slip > 5
+                    ? "hsl(var(--bar-critical))"
+                    : slip > 0
+                      ? "hsl(var(--bar-milestone))"
+                      : "hsl(var(--muted-foreground))";
+                return (
+                  <g
+                    key={`bl-${a.activity_id}-${i}`}
+                    data-testid={`gantt-baseline-${a.activity_id}`}
+                  >
+                    <rect
+                      x={bx}
+                      y={by}
+                      width={bw}
+                      height={3}
+                      fill={slipColor}
+                      fillOpacity={0.75}
+                    />
+                    {slip !== 0 && (
+                      <circle
+                        cx={bx + bw}
+                        cy={by + 1.5}
+                        r={2}
+                        fill={slipColor}
+                      />
+                    )}
+                  </g>
+                );
+              })}
           </svg>
         </div>
       </div>
