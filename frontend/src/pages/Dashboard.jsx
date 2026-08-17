@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   CalendarClock,
+  CreditCard,
   Copy,
   LayoutGrid,
   LogOut,
@@ -12,11 +13,13 @@ import {
 } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useBilling } from "@/context/BillingContext";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
+  const { isPro } = useBilling();
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +87,16 @@ export default function Dashboard() {
             {user?.email}
           </span>
           <ThemeToggle />
+          <Button
+            data-testid="billing-button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-sm text-[11px] uppercase tracking-[0.14em]"
+            onClick={() => navigate("/billing")}
+          >
+            <CreditCard className="mr-1.5 h-3.5 w-3.5" />
+            {isPro ? "Pro" : "Upgrade"}
+          </Button>
           <Button
             data-testid="logout-button"
             variant="ghost"

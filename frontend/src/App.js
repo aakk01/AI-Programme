@@ -3,8 +3,12 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import "@/App.css";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { BillingProvider } from "@/context/BillingContext";
+import { PaywallDialog } from "@/components/PaywallDialog";
 import AuthPage from "@/pages/AuthPage";
+import BillingPage from "@/pages/BillingPage";
 import Dashboard from "@/pages/Dashboard";
+import { PaymentCancel, PaymentSuccess } from "@/pages/PaymentReturn";
 import Wizard from "@/pages/Wizard";
 import Workspace from "@/pages/Workspace";
 
@@ -28,37 +32,50 @@ function App() {
   return (
     <div className="App">
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<AuthPage />} />
-            <Route
-              path="/"
-              element={
-                <Protected>
-                  <Dashboard />
-                </Protected>
-              }
-            />
-            <Route
-              path="/new"
-              element={
-                <Protected>
-                  <Wizard />
-                </Protected>
-              }
-            />
-            <Route
-              path="/project/:id"
-              element={
-                <Protected>
-                  <Workspace />
-                </Protected>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
-        <Toaster position="bottom-right" />
+        <BillingProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<AuthPage />} />
+              <Route path="/payment/success" element={<PaymentSuccess />} />
+              <Route path="/payment/cancel" element={<PaymentCancel />} />
+              <Route
+                path="/"
+                element={
+                  <Protected>
+                    <Dashboard />
+                  </Protected>
+                }
+              />
+              <Route
+                path="/new"
+                element={
+                  <Protected>
+                    <Wizard />
+                  </Protected>
+                }
+              />
+              <Route
+                path="/project/:id"
+                element={
+                  <Protected>
+                    <Workspace />
+                  </Protected>
+                }
+              />
+              <Route
+                path="/billing"
+                element={
+                  <Protected>
+                    <BillingPage />
+                  </Protected>
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+          <PaywallDialog />
+          <Toaster position="bottom-right" />
+        </BillingProvider>
       </AuthProvider>
     </div>
   );

@@ -19,6 +19,7 @@ load_dotenv(ROOT_DIR / ".env")
 import ai_gen  # noqa: E402
 import cpm  # noqa: E402
 import exporters  # noqa: E402
+import payments  # noqa: E402
 import xer_import  # noqa: E402
 from auth import (  # noqa: E402
     create_access_token,
@@ -360,6 +361,9 @@ async def _run_generation(project_id: str, inputs: dict):
 
 @api.post("/projects/{project_id}/generate")
 async def generate(project_id: str, user_id: str = Depends(get_current_user_id)):
+    if not await payments.user_has_active_subscription(user_id):
+        raise HTTPException(status_code=402,
+                            detail={"code": "pro_required", "feature": "ai_generation"})
     p = await get_project(project_id, user_id)
     if p.get("generation_status") == "running":
         return {"status": "running"}
@@ -618,6 +622,9 @@ async def compare_snapshot(project_id: str, snapshot_id: str,
 # ---------- exports ----------
 @api.get("/projects/{project_id}/export/{fmt}")
 async def export(project_id: str, fmt: str, user_id: str = Depends(get_current_user_id)):
+    if not await payments.user_has_active_subscription(user_id):
+        raise HTTPException(status_code=402,
+                            detail={"code": "pro_required", "feature": "export"})
     p = with_schedule(await get_project(project_id, user_id))
     slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in p["name"])[:60] or "programme"
     acts = p["activities"]
@@ -672,6 +679,7 @@ async def root():
 
 
 app.include_router(api)
+app.include_router(payments.router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

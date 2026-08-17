@@ -51,3 +51,16 @@ async def get_current_user_id(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
         )
     return decode_token(creds.credentials)["sub"]
+
+
+
+async def get_current_user_id_optional(request) -> str | None:
+    """Non-raising variant used by public / mixed-auth endpoints (webhook, status)."""
+    header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not header or not header.lower().startswith("bearer "):
+        return None
+    token = header.split(" ", 1)[1].strip()
+    try:
+        return decode_token(token).get("sub")
+    except HTTPException:
+        return None

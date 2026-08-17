@@ -65,6 +65,13 @@ Input wizard · AI WBS L1–L3 generation with assumptions log · server-side CP
 - **DataGrid baseline columns** (`DataGrid.jsx`): optional BL Start / BL Finish / Var (d) columns, coloured cell for non-zero variance.
 - **Verified**: 7/7 snapshot pytest, 10/10 export regression, full Playwright E2E flow green (`/app/test_reports/iteration_6.json`).
 
+### Iteration 7 (2026-08) — Stripe Payments & Pro Paywall
+- **Sandbox** (Flow A, claimable): provisioned emergent-managed Stripe sandbox (GB / GBP, SMP-eligible). Catalog: `pow_pro_monthly` = **£29 / month**. Stripe env vars stored in `backend/.env`. `setup_stripe.py` is idempotent — safe to re-run.
+- **Backend** (`payments.py`): `POST /api/payments/checkout` (uses `managed_payments={enabled:true}` with automatic_tax fallback), `GET /api/payments/status/{sid}`, `POST /api/stripe/webhook` (signature-verified — session.completed / async_payment_succeeded/failed / expired / customer.subscription.deleted / charge.refunded), `GET /api/billing/plan`, `GET /api/billing/invoices`, `POST /api/billing/portal`. `user_has_active_subscription()` gates protected features.
+- **Gating** (`server.py`): `POST /projects/{id}/generate` and `GET /projects/{id}/export/{fmt}` return **HTTP 402** with `{code:"pro_required", feature:"ai_generation"|"export"}` for free users. Snapshots, versions, CPM edits, calendar etc. remain free.
+- **Frontend**: new `BillingContext` (auto-refreshes plan on auth change), global `PaywallDialog` (with per-feature copy), `/billing` page (plan card + invoices + Customer Portal), `/payment/success` (polls status) and `/payment/cancel` return pages, `Upgrade/Pro` header button on the Dashboard. Wizard + Workspace intercept 402 and open the paywall.
+- **Verified**: 23/23 payments backend pytest, 21/21 export & snapshot regressions, 15/15 UI checks (post-fix). See `/app/test_reports/iteration_7.json`.
+
 ## Backlog
 ### P0
 - Stale "running" generation recovery if the pod restarts mid-generation (heartbeat timestamp)

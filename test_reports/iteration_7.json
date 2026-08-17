@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 7 — Stripe payments + Pro paywall end-to-end. Backend: 23/23 new payment tests pass (checkout creates cs_test_ session + records pending tx row, status 404/pending, webhook rejects missing/bad signature, /billing/plan free vs pro, /billing/invoices empty, /billing/portal 401/404, gating: /generate + all 5 export formats return 402 for free user and 200 for pro user, snapshots + legacy /versions NOT gated). Existing 21 regression tests (exports/msp/asta/xer + snapshots + baseline) all still pass with the autouse `ensure_pro_for_test_user` fixture. Frontend: dashboard 'Upgrade' button on free state, /billing free-state renders {plan_name=Free, upgrade-button, no-invoices}, clicking billing-upgrade-button fires POST /api/payments/checkout with correct lookup_key + origin_url and browser navigates to checkout.stripe.com host, /payment/cancel renders + Back-to-dashboard link, /payment/success without session_id renders error state, all 5 workspace export buttons (csv/json/xml/asta/xer) open paywall-dialog with title 'Unlock programme exports', clicking generate-button on an empty project opens paywall with title 'Unlock AI programme generation'. After inserting a paid tx doc for the test user, /billing shows plan_name=Pro + billing-portal-button, dashboard billing-button reads 'PRO', and CSV export downloads (Riverside_Tower.csv) without paywall.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Dashboard header (billing-button)",
+        "issue": "After a successful login the header still reads 'Upgrade' even for a Pro user. The label only refreshes on a full page reload or after visiting /billing. Root cause: BillingContext.refresh() runs once in a useEffect at Provider mount; the Provider mounted before login (no token) and set plan={active:false, plan:'guest'}. After the login POST, nothing re-triggers refresh(). Fix: call `refresh()` inside the Login page's success handler (or expose an auth-changed event) so the header updates without a reload.",
+        "selector": "[data-testid='billing-button']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payments.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/iter7_payments.xml",
+    "/app/test_reports/pytest/iter7_regression.xml"
+  ],
+  "action_items": [
+    "Fix BillingContext refresh-on-login: after a successful /api/auth/login the Dashboard header still reads 'Upgrade' until page reload. Trigger `refresh()` after login (or watch localStorage 'pow_token' changes).",
+    "pytest.ini uses `-n 2 --dist loadscope` — test_payments.py free_user fixture races against the autouse Pro fixture across workers (TestBillingPlan on gw1 sees a temporarily-pending doc while TestGating on gw0 is inside `free_user`). Suite passes cleanly with `-n 0`. Consider marking test_payments.py with `pytest.mark.xdist_group('payments_serial')` or `@pytest.mark.serial` and adjusting the ini, OR move the paid-doc lookup key to a per-user unique session_id that free_user only touches on its own docs. Not user-facing but will bite the next agent."
+  ],
+  "critical_code_review_comments": [
+    "BillingContext.jsx refresh is only wired to component mount — no reaction to login/logout token changes. See action item.",
+    "payments.py user_has_active_subscription: when Stripe raises StripeError while retrieving subscription it returns True as a fallback. That is safe today (DB truth) but silently hides real subscription-cancelled states if Stripe is briefly reachable then errors — log a warning at minimum.",
+    "payments.py /api/billing/portal accepts `body: dict` without a Pydantic model — origin_url is not validated. Move to a BillingPortalRequest(BaseModel) with origin_url: HttpUrl for consistency with CheckoutRequest.",
+    "payments.py get_status silently swallows stripe.error.StripeError while syncing. If Stripe is unreachable the client keeps polling `pending` forever with no server-side signal. Consider surfacing a `sync_error` field or an event log entry.",
+    "webhook handler updates tx rows keyed by session_id/subscription_id but has no idempotency guard beyond 'payment_status: {\\$ne: paid}'. For customer.subscription.deleted / charge.refunded there is no such guard — a replayed event could clobber a later paid state. Add an event-id dedupe collection.",
+    "server.py:364 and :625 both call `payments.user_has_active_subscription(user_id)` — every request re-queries Mongo. For the export endpoint this is fine, but the generate endpoint is already async-heavy; consider a short in-memory TTL cache keyed by user_id (30s) to reduce round-trips."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_payments.py"
+  ],
+  "success_rate": {
+    "backend": "100% (23/23 iter7 payments + 21/21 regression)",
+    "frontend": "93% (14/15 UI checks — dashboard header refresh-on-login bug)"
+  },
+  "test_credentials": "planner@test.com / Test1234 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "conftest.py autouse `ensure_pro_for_test_user` upserts payment_transactions {session_id: 'TEST_AUTOPRO_<uid>', payment_status: 'paid', lookup_key: 'pow_pro_monthly'} for planner@test.com at session start and deletes all TEST_* prefixed docs at session end. UI Pro-state verification also inserted/deleted 'TEST_UI_PRO' via a manual pymongo script (cleaned up). One TEST_iter7_free snapshot row was created and deleted in TestNoGatingOnSnapshots. Stripe test checkout sessions created by TestCheckout / TestStatus were deleted from payment_transactions on teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend is fully green. Only outstanding UI defect: BillingContext does not re-refresh plan after login, so the dashboard 'Upgrade/Pro' label lags until reload — main agent to patch BillingContext.jsx (e.g., call refresh() in login success or expose useEffect on token). test_payments.py must be run with `-n 0` (parallel workers race the free_user fixture); the other suites work fine under the default `-n 2 --dist loadscope`. The autouse Pro fixture in conftest.py is required so all existing export/AI regression tests continue to see Pro access — do not remove it. Stripe sandbox is claimable (Flow A) at acct_1U56iBADgjwMxVz0; webhook path is /api/stripe/webhook. The real Checkout flow was NOT completed with a test card — only redirect target host + payload were verified.",
+  "rca of the issue": "Dashboard 'Upgrade' vs 'Pro' bug — BillingProvider mounts once at app root. Its useEffect calls refresh() a single time; refresh checks localStorage.pow_token synchronously. On a fresh visit to /login there is no token, so refresh sets plan={active:false, plan:'guest'} and never runs again. After the login mutation writes the token to localStorage and navigates to /, the Provider does not re-mount so refresh() is never called. The Dashboard reads isPro from context = false → renders 'Upgrade'. Repro: logout → login as planner@test.com (with a paid tx present) → header reads 'Upgrade'; reload → header reads 'Pro'. Fix: in the Login page (or wherever the token is persisted) call the exported `refresh` from BillingContext right after saving the token, e.g. `const { refresh } = useBilling(); ... await api.post('/auth/login', ...); localStorage.setItem('pow_token', token); refresh();`. Alternatively, add a `storage`/custom-event listener inside BillingProvider that re-runs refresh whenever the token changes."
+}

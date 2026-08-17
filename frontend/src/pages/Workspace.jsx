@@ -15,8 +15,9 @@ import {
   Redo2,
 } from "lucide-react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { api, downloadExport, errMsg } from "@/lib/api";
+import { api, downloadExport, errMsg, isProRequired } from "@/lib/api";
 import { stripComputed } from "@/lib/links";
+import { useBilling } from "@/context/BillingContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -53,6 +54,7 @@ export default function Workspace() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
+  const { openPaywall } = useBilling();
 
   const [project, setProject] = useState(null);
   const [activities, setActivities] = useState([]);
@@ -116,17 +118,36 @@ export default function Workspace() {
     toast.error("Generation timed out. Please try again.");
   }, [id, ingest]);
 
+  const tryExport = useCallback(
+    async (fmt) => {
+      try {
+        await downloadExport(id, fmt);
+      } catch (e) {
+        if (e?.response?.status === 402) {
+          openPaywall("export");
+        } else {
+          toast.error(errMsg(e));
+        }
+      }
+    },
+    [id, openPaywall],
+  );
+
   const generate = useCallback(async () => {
     setGenerating(true);
     try {
       await api.post(`/projects/${id}/generate`);
       await poll();
     } catch (e) {
-      toast.error(errMsg(e));
+      if (isProRequired(e)) {
+        openPaywall("ai_generation");
+      } else {
+        toast.error(errMsg(e));
+      }
     } finally {
       setGenerating(false);
     }
-  }, [id, poll]);
+  }, [id, poll, openPaywall]);
 
   useEffect(() => {
     api
@@ -579,31 +600,31 @@ export default function Workspace() {
             <DropdownMenuContent align="end" className="bg-popover">
               <DropdownMenuItem
                 data-testid="export-csv"
-                onClick={() => downloadExport(id, "csv")}
+                onClick={() => tryExport("csv")}
               >
                 CSV
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="export-json"
-                onClick={() => downloadExport(id, "json")}
+                onClick={() => tryExport("json")}
               >
                 JSON
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="export-xml"
-                onClick={() => downloadExport(id, "xml")}
+                onClick={() => tryExport("xml")}
               >
                 MS Project XML (MSP / Asta)
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="export-asta"
-                onClick={() => downloadExport(id, "asta")}
+                onClick={() => tryExport("asta")}
               >
                 Asta Powerproject XML
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="export-xer"
-                onClick={() => downloadExport(id, "xer")}
+                onClick={() => tryExport("xer")}
               >
                 Primavera P6 XER
               </DropdownMenuItem>
