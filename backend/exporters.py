@@ -1,8 +1,12 @@
 """CSV / JSON / MS Project XML / Primavera P6 XER exporters."""
+import base64
 import csv
 import io
+import uuid
+import zlib
+import xml.etree.ElementTree as ET
 from datetime import date, datetime
-from xml.sax.saxutils import escape
+from typing import Any, Dict, List, Optional
 
 from cpm import format_predecessors
 
@@ -13,11 +17,11 @@ COLUMNS = [
 ]
 
 
-def to_csv(activities) -> str:
+def to_csv(activities: List[Dict[str, Any]]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(COLUMNS)
-    for a in activities:
+    for a in activities or []:
         w.writerow([
             a.get("activity_id", ""), a.get("wbs_code", ""), a.get("wbs_l1", ""),
             a.get("wbs_l2", ""), a.get("description", ""), a.get("type", "Task"),
@@ -30,325 +34,202 @@ def to_csv(activities) -> str:
     return buf.getvalue()
 
 
-LINK_CODE = {"FF": 0, "FS": 1, "SF": 2, "SS": 3}
+# Strict 1-based MSP / Asta link codes: 1=FF, 2=SF, 3=SS, 4=FS
+LINK_CODE = {"FF": 1, "SF": 2, "SS": 3, "FS": 4}
 MSP_CONSTRAINT = {"": 0, "SNET": 4, "FNLT": 6, "MSO": 2}
-WEEKDAY_WORKING = {"5-day": {2, 3, 4, 5, 6}, "6-day": {2, 3, 4, 5, 6, 7}, "7-day": {1, 2, 3, 4, 5, 6, 7}}
+WEEKDAY_WORKING = {
+    "5-day": {2, 3, 4, 5, 6},
+    "6-day": {2, 3, 4, 5, 6, 7},
+    "7-day": {1, 2, 3, 4, 5, 6, 7},
+}
+WBS_FIELD_ID = 188743731  # Text1 field mapping
 
 
-def _dt(d, end=False):
-    day = date.fromisoformat(str(d)[:10])
-    return f"{day.isoformat()}T{'17:00:00' if end else '08:00:00'}"
+def _dt(d: Any, end: bool = False) -> str:
+    if not d:
+        return ""
+    clean_date = str(d)[:10]
+    return f"{clean_date}T{'17:00:00' if end else '08:00:00'}"
 
 
-def _calendar_xml(cal):
-    pattern = cal.get("week_pattern", "5-day")
-    working = WEEKDAY_WORKING.get(pattern, WEEKDAY_WORKING["5-day"])
-    hours = (
-        "<WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime>"
-        "<WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes>"
-    )
-    weekdays = "".join(
-        f"<WeekDay><DayType>{d}</DayType><DayWorking>{1 if d in working else 0}</DayWorking>"
-        f"{hours if d in working else ''}</WeekDay>"
-        for d in range(1, 8)
-    )
-    exceptions = "".join(
-        f"<Exception><EnteredByOccurrences>0</EnteredByOccurrences><TimePeriod>"
-        f"<FromDate>{h}T00:00:00</FromDate><ToDate>{h}T23:59:00</ToDate></TimePeriod>"
-        f"<Occurrences>1</Occurrences><Name>Holiday</Name><Type>1</Type><DayWorking>0</DayWorking></Exception>"
-        for h in cal.get("holidays", [])
-    )
-    return working, f"""  <Calendars>
-    <Calendar>
-      <UID>1</UID>
-      <Name>Programme Calendar</Name>
-      <IsBaseCalendar>1</IsBaseCalendar>
-      <WeekDays>{weekdays}</WeekDays>
-      <Exceptions>{exceptions}</Exceptions>
-    </Calendar>
-  </Calendars>"""
-
-
-def _task_links(a, uid):
-    return "".join(
-        f"<PredecessorLink><PredecessorUID>{uid[p['id']]}</PredecessorUID>"
-        f"<Type>{LINK_CODE.get(p.get('type', 'FS'), 1)}</Type>"
-        f"<LinkLag>{int(p.get('lag', 0)) * 4800}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>"
-        for p in (a.get("predecessors") or [])
-        if p.get("id") in uid
-    )
-
-
-WBS_FIELD_ID = 188743731  # Text1 — Asta maps this to the WBS outline code on import
-
-
-def to_asta_xml(project_name: str, project_start: str, activities, calendar=None) -> str:
-    """MS Project XML tuned for Asta Powerproject: real WBS summary hierarchy plus
-    the WBS code carried in a Text1 outline-code custom field."""
-    cal = calendar or {}
-    working, calendars = _calendar_xml(cal)
-    leaves = [a for a in activities if a.get("type") != "Summary"]
-
-    groups = {}
-    for a in leaves:
-        key = (a.get("wbs_l1") or "Programme", a.get("wbs_l2") or "General")
-        groups.setdefault(key, []).append(a)
-
-    uid, next_uid = {}, 0
-    rows, seq = [], 0
-
-    def span(items):
-        starts = [str(x.get("start") or project_start) for x in items]
-        finishes = [str(x.get("finish") or project_start) for x in items]
-        return min(starts), max(finishes)
-
-    l1_order, l2_by_l1 = [], {}
-    for (l1, l2) in groups:
-        if l1 not in l1_order:
-            l1_order.append(l1)
-            l2_by_l1[l1] = []
-        if l2 not in l2_by_l1[l1]:
-            l2_by_l1[l1].append(l2)
-
-    def add_row(name, level, wbs_code, start, finish, duration, task=None):
-        nonlocal next_uid, seq
-        next_uid += 1
-        seq += 1
-        is_summary = task is None
-        atype = "Summary" if is_summary else task.get("type", "Task")
-        if not is_summary:
-            uid[task["activity_id"]] = next_uid
-        rows.append({
-            "uid": next_uid, "id": seq, "name": name, "level": level, "wbs": wbs_code,
-            "start": start, "finish": finish, "duration": duration,
-            "milestone": 1 if atype == "Milestone" else 0,
-            "summary": 1 if is_summary else 0,
-            "task": task,
-        })
-
-    for i, l1 in enumerate(l1_order, start=1):
-        l1_items = [a for (k1, _), items in groups.items() if k1 == l1 for a in items]
-        s, f = span(l1_items)
-        add_row(l1, 1, str(i), s, f, 0)
-        for j, l2 in enumerate(l2_by_l1[l1], start=1):
-            items = groups[(l1, l2)]
-            s2, f2 = span(items)
-            add_row(l2, 2, f"{i}.{j}", s2, f2, 0)
-            for a in items:
-                dur = 0 if a.get("type") == "Milestone" else int(a.get("duration") or 0)
-                add_row(
-                    a.get("description") or a["activity_id"], 3,
-                    a.get("wbs_code") or f"{i}.{j}",
-                    str(a.get("start") or project_start),
-                    str(a.get("finish") or project_start), dur, task=a,
-                )
-
-    task_xml = []
-    for r in rows:
-        a = r["task"]
-        ext = (
-            f"<ExtendedAttribute><FieldID>{WBS_FIELD_ID}</FieldID>"
-            f"<Value>{escape(str(r['wbs']))}</Value></ExtendedAttribute>"
-        )
-        preds = ""
-        critical_el = ""
-        slack_el = ""
-        constraint = "<ConstraintType>0</ConstraintType>"
-        notes = ""
-        if a is not None:
-            ctype = (a.get("constraint_type") or "").upper()
-            cdate = a.get("constraint_date")
-            constraint = (
-                f"<ConstraintType>{MSP_CONSTRAINT.get(ctype, 0)}</ConstraintType>"
-                + (f"<ConstraintDate>{_dt(cdate)}</ConstraintDate>" if ctype and cdate else "")
-            )
-            critical_el = f"<Critical>{1 if a.get('critical') else 0}</Critical>"
-            slack_el = (
-                f"<FreeSlack>{int(a.get('free_float') or 0) * 4800}</FreeSlack>"
-                f"<TotalSlack>{int(a.get('total_float') or 0) * 4800}</TotalSlack>"
-            )
-            notes = f"<Notes>{escape(a['activity_id'])}</Notes>"
-            preds = _task_links(a, uid)
-        # Element order matches the MSP XSD; Asta ingests MSP XML and will drop
-        # fields (including Duration) if elements appear out of sequence.
-        task_xml.append(f"""    <Task>
-      <UID>{r['uid']}</UID>
-      <ID>{r['id']}</ID>
-      <Name>{escape(str(r['name']))}</Name>
-      <Type>1</Type>
-      <IsNull>0</IsNull>
-      {notes}
-      <WBS>{escape(str(r['wbs']))}</WBS>
-      <OutlineNumber>{r['wbs']}</OutlineNumber>
-      <OutlineLevel>{r['level']}</OutlineLevel>
-      <Priority>500</Priority>
-      <Start>{_dt(r['start'])}</Start>
-      <Finish>{_dt(r['finish'], end=True)}</Finish>
-      <Duration>PT{int(r['duration']) * 8}H0M0S</Duration>
-      <DurationFormat>7</DurationFormat>
-      <Work>PT{int(r['duration']) * 8}H0M0S</Work>
-      <EffortDriven>0</EffortDriven>
-      <Estimated>0</Estimated>
-      <Milestone>{r['milestone']}</Milestone>
-      <Summary>{r['summary']}</Summary>
-      {critical_el}
-      <IsSubproject>0</IsSubproject>
-      {slack_el}
-      <FixedCost>0</FixedCost>
-      <FixedCostAccrual>3</FixedCostAccrual>
-      <PercentComplete>0</PercentComplete>
-      <PercentWorkComplete>0</PercentWorkComplete>
-      {constraint}
-      <CalendarUID>-1</CalendarUID>
-      <Manual>0</Manual>
-      <Active>1</Active>
-      {ext}
-      {preds}
-    </Task>""")
-
-    finish = max([str(r["finish"]) for r in rows] or [project_start])
-    per_week = 480 * len(working)
-    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Project xmlns="http://schemas.microsoft.com/project">
-  <SaveVersion>14</SaveVersion>
-  <Name>{escape(project_name)}.xml</Name>
-  <Title>{escape(project_name)}</Title>
-  <Author>Programme of Works Generator</Author>
-  <ScheduleFromStart>1</ScheduleFromStart>
-  <StartDate>{_dt(project_start)}</StartDate>
-  <FinishDate>{_dt(finish, end=True)}</FinishDate>
-  <CurrentDate>{datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}</CurrentDate>
-  <CalendarUID>1</CalendarUID>
-  <DurationFormat>7</DurationFormat>
-  <MinutesPerDay>480</MinutesPerDay>
-  <MinutesPerWeek>{per_week}</MinutesPerWeek>
-  <DaysPerMonth>20</DaysPerMonth>
-  <NewTasksAreManual>0</NewTasksAreManual>
-  <ExtendedAttributes>
-    <ExtendedAttribute>
-      <FieldID>{WBS_FIELD_ID}</FieldID>
-      <FieldName>Text1</FieldName>
-      <Alias>WBS Code</Alias>
-    </ExtendedAttribute>
-  </ExtendedAttributes>
-{calendars}
-  <Tasks>
-{chr(10).join(task_xml)}
-  </Tasks>
-</Project>
-"""
-
-
-def to_msproject_xml(project_name: str, project_start: str, activities, calendar=None) -> str:
+def to_asta_xml(
+    project_name: str,
+    project_start: str,
+    activities: List[Dict[str, Any]],
+    calendar: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Generate perfectly valid MS Project XML using ElementTree."""
     cal = calendar or {}
     pattern = cal.get("week_pattern", "5-day")
-    working = WEEKDAY_WORKING.get(pattern, WEEKDAY_WORKING["5-day"])
-    hours = (
-        "<WorkingTimes><WorkingTime><FromTime>08:00:00</FromTime><ToTime>12:00:00</ToTime></WorkingTime>"
-        "<WorkingTime><FromTime>13:00:00</FromTime><ToTime>17:00:00</ToTime></WorkingTime></WorkingTimes>"
-    )
-    weekdays = "".join(
-        f"<WeekDay><DayType>{d}</DayType><DayWorking>{1 if d in working else 0}</DayWorking>"
-        f"{hours if d in working else ''}</WeekDay>"
-        for d in range(1, 8)
-    )
-    exceptions = "".join(
-        f"<Exception><EnteredByOccurrences>0</EnteredByOccurrences><TimePeriod>"
-        f"<FromDate>{h}T00:00:00</FromDate><ToDate>{h}T23:59:00</ToDate></TimePeriod>"
-        f"<Occurrences>1</Occurrences><Name>Holiday</Name><Type>1</Type><DayWorking>0</DayWorking></Exception>"
-        for h in cal.get("holidays", [])
-    )
+    working_days = WEEKDAY_WORKING.get(pattern, WEEKDAY_WORKING["5-day"])
+    p_start = str(project_start or date.today().isoformat())[:10]
 
-    uid = {a["activity_id"]: i + 1 for i, a in enumerate(activities)}
-    rows = []
-    for i, a in enumerate(activities):
+    finish_dates = [str(a.get("finish"))[:10] for a in activities if a.get("finish")]
+    p_finish = max(finish_dates) if finish_dates else p_start
+    per_week = 480 * len(working_days)
+
+    root = ET.Element("Project")
+    
+    # Project Header (Sequence enforced)
+    ET.SubElement(root, "SaveVersion").text = "14"
+    ET.SubElement(root, "Name").text = f"{project_name or 'Project'}.xml"
+    ET.SubElement(root, "Title").text = project_name or "Project"
+    ET.SubElement(root, "Author").text = "Programme Generator"
+    ET.SubElement(root, "ScheduleFromStart").text = "1"
+    ET.SubElement(root, "StartDate").text = _dt(p_start)
+    ET.SubElement(root, "FinishDate").text = _dt(p_finish, end=True)
+    ET.SubElement(root, "CalendarUID").text = "1"
+    ET.SubElement(root, "DefaultStartTime").text = "08:00:00"
+    ET.SubElement(root, "DefaultFinishTime").text = "17:00:00"
+    ET.SubElement(root, "DurationFormat").text = "7"
+    ET.SubElement(root, "MinutesPerDay").text = "480"
+    ET.SubElement(root, "MinutesPerWeek").text = str(per_week)
+    ET.SubElement(root, "DaysPerMonth").text = "20"
+    ET.SubElement(root, "NewTasksAreManual").text = "0"
+
+    # Extended Attributes definition
+    ext_attrs = ET.SubElement(root, "ExtendedAttributes")
+    ea = ET.SubElement(ext_attrs, "ExtendedAttribute")
+    ET.SubElement(ea, "FieldID").text = str(WBS_FIELD_ID)
+    ET.SubElement(ea, "FieldName").text = "Text1"
+    ET.SubElement(ea, "Alias").text = "WBS Code"
+
+    # Calendars
+    cals = ET.SubElement(root, "Calendars")
+    cal_el = ET.SubElement(cals, "Calendar")
+    ET.SubElement(cal_el, "UID").text = "1"
+    ET.SubElement(cal_el, "Name").text = "Standard Calendar"
+    ET.SubElement(cal_el, "IsBaseCalendar").text = "1"
+    
+    wds = ET.SubElement(cal_el, "WeekDays")
+    for d in range(1, 8):
+        wd = ET.SubElement(wds, "WeekDay")
+        ET.SubElement(wd, "DayType").text = str(d)
+        is_work = 1 if d in working_days else 0
+        ET.SubElement(wd, "DayWorking").text = str(is_work)
+        if is_work:
+            wts = ET.SubElement(wd, "WorkingTimes")
+            wt1 = ET.SubElement(wts, "WorkingTime")
+            ET.SubElement(wt1, "FromTime").text = "08:00:00"
+            ET.SubElement(wt1, "ToTime").text = "12:00:00"
+            wt2 = ET.SubElement(wts, "WorkingTime")
+            ET.SubElement(wt2, "FromTime").text = "13:00:00"
+            ET.SubElement(wt2, "ToTime").text = "17:00:00"
+
+    holidays = cal.get("holidays", []) or []
+    if holidays:
+        excs = ET.SubElement(cal_el, "Exceptions")
+        for h in holidays:
+            exc = ET.SubElement(excs, "Exception")
+            ET.SubElement(exc, "EnteredByOccurrences").text = "0"
+            tp = ET.SubElement(exc, "TimePeriod")
+            ET.SubElement(tp, "FromDate").text = f"{str(h)[:10]}T00:00:00"
+            ET.SubElement(tp, "ToDate").text = f"{str(h)[:10]}T23:59:00"
+            ET.SubElement(exc, "Occurrences").text = "1"
+            ET.SubElement(exc, "Name").text = "Holiday"
+            ET.SubElement(exc, "Type").text = "1"
+            ET.SubElement(exc, "DayWorking").text = "0"
+
+    # Tasks definition
+    tasks_el = ET.SubElement(root, "Tasks")
+    uid_map = {a.get("activity_id"): idx for idx, a in enumerate(activities, start=1) if a.get("activity_id")}
+
+    # Root Project Summary Task
+    t0 = ET.SubElement(tasks_el, "Task")
+    ET.SubElement(t0, "UID").text = "0"
+    ET.SubElement(t0, "ID").text = "0"
+    ET.SubElement(t0, "Name").text = project_name or "Project"
+    ET.SubElement(t0, "Type").text = "1"
+    ET.SubElement(t0, "IsNull").text = "0"
+    ET.SubElement(t0, "OutlineLevel").text = "0"
+    ET.SubElement(t0, "Priority").text = "500"
+    ET.SubElement(t0, "Start").text = _dt(p_start)
+    ET.SubElement(t0, "Finish").text = _dt(p_finish, end=True)
+    ET.SubElement(t0, "Summary").text = "1"
+
+    for idx, a in enumerate(activities, start=1):
         atype = a.get("type", "Task")
-        dur = 0 if atype == "Milestone" else int(a.get("duration") or 0)
-        preds = "".join(
-            f"<PredecessorLink><PredecessorUID>{uid[p['id']]}</PredecessorUID>"
-            f"<Type>{LINK_CODE.get(p.get('type', 'FS'), 1)}</Type>"
-            f"<LinkLag>{int(p.get('lag', 0)) * 4800}</LinkLag><LagFormat>7</LagFormat></PredecessorLink>"
-            for p in (a.get("predecessors") or [])
-            if p.get("id") in uid
-        )
-        ctype = (a.get("constraint_type") or "").upper()
+        is_ms = atype == "Milestone"
+        is_summary = atype == "Summary"
+        dur = 0 if is_ms else int(a.get("duration", 0) or 0)
+        
+        t_el = ET.SubElement(tasks_el, "Task")
+        ET.SubElement(t_el, "UID").text = str(idx)
+        ET.SubElement(t_el, "ID").text = str(idx)
+        ET.SubElement(t_el, "Name").text = a.get("description") or a.get("activity_id") or "Task"
+        ET.SubElement(t_el, "Type").text = "1"
+        ET.SubElement(t_el, "IsNull").text = "0"
+        
+        wbs_code = a.get("wbs_code") or a.get("wbs_l1") or ""
+        if wbs_code:
+            ET.SubElement(t_el, "WBS").text = str(wbs_code)
+            ET.SubElement(t_el, "OutlineNumber").text = str(wbs_code)
+            
+        outline_lvl = 1 if is_summary else (3 if a.get("wbs_l2") else 2)
+        ET.SubElement(t_el, "OutlineLevel").text = str(outline_lvl)
+        ET.SubElement(t_el, "Priority").text = "500"
+        ET.SubElement(t_el, "Start").text = _dt(a.get("start") or p_start)
+        ET.SubElement(t_el, "Finish").text = _dt(a.get("finish") or p_start, end=not is_ms)
+        ET.SubElement(t_el, "Duration").text = f"PT{dur * 8}H0M0S"
+        ET.SubElement(t_el, "DurationFormat").text = "7"
+        ET.SubElement(t_el, "Work").text = f"PT{dur * 8}H0M0S"
+        ET.SubElement(t_el, "EffortDriven").text = "0"
+        ET.SubElement(t_el, "Estimated").text = "0"
+        ET.SubElement(t_el, "Milestone").text = "1" if is_ms else "0"
+        ET.SubElement(t_el, "Summary").text = "1" if is_summary else "0"
+        ET.SubElement(t_el, "Critical").text = "1" if a.get("critical") else "0"
+        ET.SubElement(t_el, "IsSubproject").text = "0"
+        
+        tf_tenths = int(a.get("total_float", 0) or 0) * 4800
+        ff_tenths = int(a.get("free_float", 0) or 0) * 4800
+        ET.SubElement(t_el, "FreeSlack").text = str(ff_tenths)
+        ET.SubElement(t_el, "TotalSlack").text = str(tf_tenths)
+        ET.SubElement(t_el, "FixedCost").text = "0"
+        ET.SubElement(t_el, "FixedCostAccrual").text = "3"
+        ET.SubElement(t_el, "PercentComplete").text = "0"
+        ET.SubElement(t_el, "PercentWorkComplete").text = "0"
+        
+        ctype = str(a.get("constraint_type") or "").upper()
         cdate = a.get("constraint_date")
-        constraint = f"<ConstraintType>{MSP_CONSTRAINT.get(ctype, 0)}</ConstraintType>" + (
-            f"<ConstraintDate>{_dt(cdate)}</ConstraintDate>" if ctype and cdate else ""
-        )
-        outline_level = 1 if atype == "Summary" else 3
-        wbs_code = a.get("wbs_code") or ""
-        # Element order MUST follow the MSP XSD or MSP silently drops fields
-        # (notably Duration → shows as 0d in every task).
-        rows.append(f"""    <Task>
-      <UID>{uid[a['activity_id']]}</UID>
-      <ID>{i + 1}</ID>
-      <Name>{escape(str(a.get('description') or a['activity_id']))}</Name>
-      <Type>1</Type>
-      <IsNull>0</IsNull>
-      <WBS>{escape(str(wbs_code))}</WBS>
-      <OutlineNumber>{escape(str(wbs_code))}</OutlineNumber>
-      <OutlineLevel>{outline_level}</OutlineLevel>
-      <Priority>500</Priority>
-      <Start>{_dt(a.get('start') or project_start)}</Start>
-      <Finish>{_dt(a.get('finish') or project_start, end=True)}</Finish>
-      <Duration>PT{dur * 8}H0M0S</Duration>
-      <DurationFormat>7</DurationFormat>
-      <Work>PT{dur * 8}H0M0S</Work>
-      <EffortDriven>0</EffortDriven>
-      <Estimated>0</Estimated>
-      <Milestone>{1 if atype == 'Milestone' else 0}</Milestone>
-      <Summary>{1 if atype == 'Summary' else 0}</Summary>
-      <Critical>{1 if a.get('critical') else 0}</Critical>
-      <IsSubproject>0</IsSubproject>
-      <FreeSlack>{int(a.get('free_float') or 0) * 4800}</FreeSlack>
-      <TotalSlack>{int(a.get('total_float') or 0) * 4800}</TotalSlack>
-      <FixedCost>0</FixedCost>
-      <FixedCostAccrual>3</FixedCostAccrual>
-      <PercentComplete>0</PercentComplete>
-      <PercentWorkComplete>0</PercentWorkComplete>
-      {constraint}
-      <CalendarUID>-1</CalendarUID>
-      <LevelAssignments>1</LevelAssignments>
-      <LevelingCanSplit>1</LevelingCanSplit>
-      <LevelingDelay>0</LevelingDelay>
-      <LevelingDelayFormat>8</LevelingDelayFormat>
-      <PreLeveledStart>{_dt(a.get('start') or project_start)}</PreLeveledStart>
-      <PreLeveledFinish>{_dt(a.get('finish') or project_start, end=True)}</PreLeveledFinish>
-      <Manual>0</Manual>
-      {preds}
-    </Task>""")
+        ET.SubElement(t_el, "ConstraintType").text = str(MSP_CONSTRAINT.get(ctype, 0))
+        if ctype and cdate:
+            ET.SubElement(t_el, "ConstraintDate").text = _dt(cdate)
+            
+        ET.SubElement(t_el, "CalendarUID").text = "1"
+        ET.SubElement(t_el, "Manual").text = "0"
+        ET.SubElement(t_el, "Active").text = "1"
 
-    finish = max([str(a.get("finish") or "") for a in activities] or [project_start])
-    per_week = 480 * len(working)
-    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Project xmlns="http://schemas.microsoft.com/project">
-  <SaveVersion>14</SaveVersion>
-  <Name>{escape(project_name)}.xml</Name>
-  <Title>{escape(project_name)}</Title>
-  <ScheduleFromStart>1</ScheduleFromStart>
-  <StartDate>{_dt(project_start)}</StartDate>
-  <FinishDate>{_dt(finish, end=True)}</FinishDate>
-  <CurrentDate>{datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}</CurrentDate>
-  <CalendarUID>1</CalendarUID>
-  <DurationFormat>7</DurationFormat>
-  <MinutesPerDay>480</MinutesPerDay>
-  <MinutesPerWeek>{per_week}</MinutesPerWeek>
-  <DaysPerMonth>20</DaysPerMonth>
-  <Calendars>
-    <Calendar>
-      <UID>1</UID>
-      <Name>Programme Calendar</Name>
-      <IsBaseCalendar>1</IsBaseCalendar>
-      <WeekDays>{weekdays}</WeekDays>
-      <Exceptions>{exceptions}</Exceptions>
-    </Calendar>
-  </Calendars>
-  <Tasks>
-{chr(10).join(rows)}
-  </Tasks>
-</Project>
-"""
+        # PredecessorLink MUST appear before ExtendedAttribute in XSD sequence
+        for p in a.get("predecessors") or []:
+            pid = p.get("id") if isinstance(p, dict) else getattr(p, "id", None)
+            ptype = (p.get("type", "FS") if isinstance(p, dict) else getattr(p, "type", "FS")) or "FS"
+            plag = int((p.get("lag", 0) if isinstance(p, dict) else getattr(p, "lag", 0)) or 0)
+            if pid and pid in uid_map:
+                link_el = ET.SubElement(t_el, "PredecessorLink")
+                ET.SubElement(link_el, "PredecessorUID").text = str(uid_map[pid])
+                ET.SubElement(link_el, "Type").text = str(LINK_CODE.get(str(ptype).upper(), 4))
+                ET.SubElement(link_el, "LinkLag").text = str(plag * 4800)
+                ET.SubElement(link_el, "LagFormat").text = "7"
+
+        # ExtendedAttribute follows Predecessors
+        if wbs_code:
+            ext_el = ET.SubElement(t_el, "ExtendedAttribute")
+            ET.SubElement(ext_el, "FieldID").text = str(WBS_FIELD_ID)
+            ET.SubElement(ext_el, "Value").text = str(wbs_code)
+
+    xml_str = ET.tostring(root, encoding="unicode")
+    # Hack to inject namespace without triggering ElementTree ValueError bugs
+    xml_str = xml_str.replace('<Project>', '<Project xmlns="http://schemas.microsoft.com/project">')
+    return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n{xml_str}'
+
+
+def to_msproject_xml(
+    project_name: str,
+    project_start: str,
+    activities: List[Dict[str, Any]],
+    calendar: Optional[Dict[str, Any]] = None,
+) -> str:
+    return to_asta_xml(project_name, project_start, activities, calendar)
 
 
 # ---------------- Primavera P6 XER ----------------
@@ -357,25 +238,33 @@ XER_CONSTRAINT = {"SNET": "CS_MSOB", "FNLT": "CS_MEOB", "MSO": "CS_MANDSTART"}
 XER_WORKDAY = {"5-day": 5, "6-day": 6, "7-day": 7}
 
 
-def _xd(d, t="08:00"):
+def _xd(d: Any, t: str = "08:00") -> str:
     return f"{str(d)[:10]} {t}" if d else ""
 
 
-def _table(name, fields, rows):
+def _table(name: str, fields: List[str], rows: List[List[Any]]) -> List[str]:
     out = [f"%T\t{name}", "%F\t" + "\t".join(fields)]
     for r in rows:
         out.append("%R\t" + "\t".join("" if v is None else str(v) for v in r))
     return out
 
 
-def to_xer(project_name: str, project_start: str, project_finish: str, activities, calendar=None) -> str:
+def to_xer(
+    project_name: str,
+    project_start: str,
+    project_finish: str,
+    activities: List[Dict[str, Any]],
+    calendar: Optional[Dict[str, Any]] = None,
+) -> str:
     cal = calendar or {}
     pattern = cal.get("week_pattern", "5-day")
     ndays = XER_WORKDAY.get(pattern, 5)
-    day_hours = ["0" for _ in range(7)]
-    for i in range(ndays):
-        day_hours[i] = "1"
-    clndr_data = (
+
+    p_start_str = _xd(project_start, "08:00")
+    p_finish_str = _xd(project_finish, "17:00")
+    proj_guid = f"{{{uuid.uuid4()}}}"
+
+    raw_clndr = (
         "(0||CalendarData()("
         + "".join(
             f"(0||{i + 1}()"
@@ -383,9 +272,12 @@ def to_xer(project_name: str, project_start: str, project_finish: str, activitie
             for i in range(7)
         )
         + ")(0||Exceptions()"
-        + "".join(f"(0||{h.replace('-', '')}()))" for h in cal.get("holidays", []))
+        + "".join(f"(0||{str(h).replace('-', '')}()))" for h in cal.get("holidays", []) or [])
         + "))"
     )
+
+    compressed_clndr = zlib.compress(raw_clndr.encode("utf-8"))
+    clndr_data_b64 = base64.b64encode(compressed_clndr).decode("ascii")
 
     lines = [
         "ERMHDR\t19.12\t"
@@ -398,7 +290,7 @@ def to_xer(project_name: str, project_start: str, project_finish: str, activitie
         ["curr_id", "decimal_digit_cnt", "curr_symbol", "decimal_symbol", "digit_group_symbol",
          "pos_curr_fmt_type", "neg_curr_fmt_type", "curr_type", "curr_short_name",
          "group_digit_cnt", "base_exch_rate"],
-        [[1, 2, "£", ".", ",", "#1.1", "(#1.1)", "Pound", "GBP", 3, 1]],
+        [[1, 2, "£", ".", ",", "#1.1", "(#1.1)", "Pound", "GBP", 3, 1.0]],
     )
 
     lines += _table(
@@ -406,8 +298,8 @@ def to_xer(project_name: str, project_start: str, project_finish: str, activitie
         ["clndr_id", "default_flag", "clndr_name", "proj_id", "base_clndr_id", "last_chng_date",
          "clndr_type", "day_hr_cnt", "week_hr_cnt", "month_hr_cnt", "year_hr_cnt", "rsrc_private",
          "clndr_data"],
-        [[1, "Y", "Programme Calendar", "", "", "", "CA_Base", 8, ndays * 8, ndays * 8 * 4.34,
-          ndays * 8 * 52, "N", clndr_data]],
+        [[1, "Y", "Standard Calendar", "", "", "", "CA_Base", 8.0, float(ndays * 8), float(ndays * 8 * 4.34),
+          float(ndays * 8 * 52), "N", clndr_data_b64]],
     )
 
     lines += _table(
@@ -423,13 +315,12 @@ def to_xer(project_name: str, project_start: str, project_finish: str, activitie
          "def_duration_type", "task_code_prefix", "guid", "def_qty_type", "add_by_name",
          "web_local_root_path", "proj_url", "def_rate_type", "add_act_remain_flag",
          "act_this_per_link_flag", "def_task_type", "act_pct_link_flag", "add_pct_type",
-         "tasks_ct", "sum_only_flag"],
-        [[1, 1, "N", "Y", "N", "N", "Y", "N", "N", "N", ".", "CP_Drtn", project_name[:40], "", "", "",
+         "tasks_ct", "sum_only_flag", "anticip_start_date", "anticip_end_date"],
+        [[1, 1, "N", "Y", "N", "N", "Y", "N", "N", "N", ".", "CP_Drtn", (project_name or "Project")[:40], "", "", "",
           "", 1, "", 1000, 10, 10, 4, "RL_Medium", 100, 0, 0, 0,
-          _xd(project_start), _xd(project_start), _xd(project_finish, "17:00"),
-          _xd(project_finish, "17:00"), _xd(project_start), "", _xd(project_start),
-          "DT_FixedDUR2", "A", "", "QT_Hour", "admin", "", "", "COST_PER_QTY_RATE_TYPE1",
-          "N", "N", "TT_Task", "N", "CP_Drtn", len(activities), "N"]],
+          p_start_str, p_start_str, p_finish_str, p_finish_str, p_start_str, "", p_start_str,
+          "DT_FixedDUR2", "A", proj_guid, "QT_Hour", "admin", "", "", "COST_PER_QTY_RATE_TYPE1",
+          "N", "N", "TT_Task", "N", "CP_Drtn", len(activities), "N", p_start_str, p_finish_str]],
     )
 
     stages = []
@@ -437,59 +328,72 @@ def to_xer(project_name: str, project_start: str, project_finish: str, activitie
     for a in activities:
         s = a.get("wbs_l1") or "Programme"
         if s not in seen:
-            seen[s] = len(seen) + 2  # 1 reserved for the project root node
+            seen[s] = len(seen) + 2
             stages.append(s)
-    wbs_rows = [[1, 1, "", "N", "", 0, 1, project_name[:60], "WBS_Node", "Y", "", "", "", "", ""]]
+
+    wbs_rows = [[1, 1, "", "N", "", 0, 1, (project_name or "Project")[:60], "WBS_Node", "Y", "", "", "", "", "", p_start_str, p_finish_str, f"{{{uuid.uuid4()}}}"]]
     for s in stages:
-        wbs_rows.append([seen[s], 1, 1, "N", "", seen[s], 1, s[:60], "WBS_Node", "N", "", "", "", "", ""])
+        wbs_rows.append([seen[s], 1, 1, "N", "", seen[s], 1, s[:60], "WBS_Node", "N", "", "", "", "", "", p_start_str, p_finish_str, f"{{{uuid.uuid4()}}}"])
+
     lines += _table(
         "PROJWBS",
         ["wbs_id", "proj_id", "parent_wbs_id", "obs_id", "seq_num", "est_wt", "proj_node_flag",
          "sum_data_flag", "status_code", "wbs_short_name", "wbs_name", "phase_id", "orig_cost",
-         "indep_remain_total_cost", "ann_dscnt_rate_pct"],
+         "indep_remain_total_cost", "ann_dscnt_rate_pct", "anticip_start_date", "anticip_end_date", "guid"],
         [[r[0], 1, r[2] or "", "", r[5], 1, "Y" if r[0] == 1 else "N", "N", "WS_Open",
-          (r[7] or "")[:20], r[7], "", 0, 0, ""] for r in wbs_rows],
+          (r[7] or "")[:20], r[7], "", 0, 0, "", r[15], r[16], r[17]] for r in wbs_rows],
     )
 
-    task_ids = {a["activity_id"]: 1000 + i for i, a in enumerate(activities)}
+    task_ids = {a.get("activity_id"): 1000 + i for i, a in enumerate(activities) if a.get("activity_id")}
     task_rows = []
     for i, a in enumerate(activities):
+        aid = a.get("activity_id")
+        if not aid:
+            continue
         atype = a.get("type", "Task")
         dur = 0 if atype == "Milestone" else int(a.get("duration") or 0)
         ttype = "TT_Mile" if atype == "Milestone" else "TT_Task"
-        ctype = (a.get("constraint_type") or "").upper()
+        ctype = str(a.get("constraint_type") or "").upper()
         task_rows.append([
-            task_ids[a["activity_id"]], 1, seen.get(a.get("wbs_l1") or "Programme", 2), 1,
-            "TK_NotStart", a["activity_id"], (a.get("description") or "")[:120],
-            dur * 8, dur * 8, 0, 0, ttype, "DT_FixedDUR2", "CP_Drtn",
-            int(a.get("total_float") or 0) * 8, int(a.get("free_float") or 0) * 8,
+            task_ids[aid], 1, seen.get(a.get("wbs_l1") or "Programme", 2), 1,
+            "TK_NotStart", aid, (a.get("description") or "")[:120],
+            float(dur * 8), float(dur * 8), 0.0, 0.0, ttype, "DT_FixedDUR2", "CP_Drtn",
+            float(int(a.get("total_float") or 0) * 8), float(int(a.get("free_float") or 0) * 8),
             "Y" if a.get("critical") else "N",
             _xd(a.get("start")), _xd(a.get("finish"), "17:00"),
             _xd(a.get("start")), _xd(a.get("finish"), "17:00"),
             XER_CONSTRAINT.get(ctype, ""), _xd(a.get("constraint_date")) if ctype else "",
             i + 1,
+            f"{{{uuid.uuid4()}}}",
         ])
+
     lines += _table(
         "TASK",
         ["task_id", "proj_id", "wbs_id", "clndr_id", "status_code", "task_code", "task_name",
          "target_drtn_hr_cnt", "remain_drtn_hr_cnt", "act_work_qty", "target_work_qty",
          "task_type", "duration_type", "complete_pct_type", "total_float_hr_cnt",
          "free_float_hr_cnt", "driving_path_flag", "early_start_date", "early_end_date",
-         "target_start_date", "target_end_date", "cstr_type", "cstr_date", "phys_complete_pct"],
+         "target_start_date", "target_end_date", "cstr_type", "cstr_date", "phys_complete_pct", "guid"],
         task_rows,
     )
 
     pred_rows = []
     n = 1
     for a in activities:
+        aid = a.get("activity_id")
+        if not aid or aid not in task_ids:
+            continue
         for p in a.get("predecessors") or []:
-            if p.get("id") not in task_ids:
-                continue
-            pred_rows.append([
-                n, task_ids[a["activity_id"]], task_ids[p["id"]], 1, 1,
-                XER_PRED.get(p.get("type", "FS"), "PR_FS"), int(p.get("lag", 0)) * 8, "", "N",
-            ])
-            n += 1
+            pid = p.get("id") if isinstance(p, dict) else getattr(p, "id", None)
+            ptype = (p.get("type", "FS") if isinstance(p, dict) else getattr(p, "type", "FS")) or "FS"
+            plag = int((p.get("lag", 0) if isinstance(p, dict) else getattr(p, "lag", 0)) or 0)
+            if pid and pid in task_ids:
+                pred_rows.append([
+                    n, task_ids[aid], task_ids[pid], 1, 1,
+                    XER_PRED.get(str(ptype).upper(), "PR_FS"), float(plag * 8), "", "N",
+                ])
+                n += 1
+
     lines += _table(
         "TASKPRED",
         ["task_pred_id", "task_id", "pred_task_id", "proj_id", "pred_proj_id", "pred_type",
