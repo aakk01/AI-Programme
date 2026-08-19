@@ -1,0 +1,121 @@
+@import url("https://fonts.googleapis.com/css2?family=Chivo:wght@300;400;700;900&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        --background: 0 0% 100%;
+        --foreground: 0 0% 4%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 4%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 4%;
+        --primary: 0 0% 4%;
+        --primary-foreground: 0 0% 98%;
+        --secondary: 240 5% 96%;
+        --secondary-foreground: 0 0% 9%;
+        --muted: 240 5% 96%;
+        --muted-foreground: 0 0% 32%;
+        --accent: 240 5% 94%;
+        --accent-foreground: 0 0% 9%;
+        --destructive: 4 90% 58%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 90%;
+        --input: 0 0% 88%;
+        --ring: 217 100% 50%;
+        --surface: 240 6% 97%;
+        --bar: 217 100% 50%;
+        --bar-critical: 4 100% 59%;
+        --bar-milestone: 37 91% 55%;
+        --radius: 0.25rem;
+    }
+    .dark {
+        --background: 0 0% 4%;
+        --foreground: 0 0% 98%;
+        --card: 0 0% 8%;
+        --card-foreground: 0 0% 98%;
+        --popover: 0 0% 8%;
+        --popover-foreground: 0 0% 98%;
+        --primary: 0 0% 98%;
+        --primary-foreground: 0 0% 6%;
+        --secondary: 0 0% 12%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 0 0% 12%;
+        --muted-foreground: 0 0% 64%;
+        --accent: 0 0% 16%;
+        --accent-foreground: 0 0% 98%;
+        --destructive: 4 80% 52%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 15%;
+        --input: 0 0% 18%;
+        --ring: 217 100% 60%;
+        --surface: 0 0% 8%;
+        --bar: 217 100% 58%;
+        --bar-critical: 4 100% 62%;
+        --bar-milestone: 37 91% 58%;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+        margin: 0;
+        font-family: "IBM Plex Sans", sans-serif;
+        -webkit-font-smoothing: antialiased;
+        font-size: 14px;
+    }
+    h1,
+    h2,
+    h3,
+    h4 {
+        font-family: "Chivo", sans-serif;
+        letter-spacing: -0.02em;
+    }
+    ::selection {
+        background: hsl(217 100% 50% / 0.25);
+    }
+}
+
+.font-mono-data {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+.grid-paper {
+    background-image:
+        linear-gradient(hsl(var(--border) / 0.5) 1px, transparent 1px),
+        linear-gradient(90deg, hsl(var(--border) / 0.5) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
+.cell-input {
+    @apply w-full bg-transparent px-2 py-[3px] outline-none focus:bg-background focus:ring-1 focus:ring-[hsl(var(--ring))];
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+}
+
+::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+}
+
+@layer base {
+    [data-debug-wrapper="true"] {
+        display: contents !important;
+    }
+}
