@@ -48,6 +48,7 @@ import { GanttChart } from "@/components/GanttChart";
 import { CalendarDialog } from "@/components/CalendarDialog";
 import { VarianceDialog } from "@/components/VarianceDialog";
 import { AiChatDrawer } from "@/components/AiChatDrawer";
+import { ActivityModal } from "@/components/ActivityModal";
 import { SummaryDashboard } from "@/components/SummaryDashboard";
 import { HealthDashboard } from "@/components/HealthDashboard";
 import { ExportModule } from "@/components/ExportModule";
@@ -80,6 +81,7 @@ export function Workspace() {
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [healthSummary, setHealthSummary] = useState(null);
 
@@ -97,6 +99,8 @@ export function Workspace() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [varianceOpen, setVarianceOpen] = useState(false);
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
+  const [activityModalOpen, setActivityModalOpen] = useState(false);
+  const [selectedActivityForEdit, setSelectedActivityForEdit] = useState(null);
 
   // Snapshots & Baseline Comparison
   const [snapshots, setSnapshots] = useState([]);
@@ -105,6 +109,33 @@ export function Workspace() {
   const [showBaselineCols, setShowBaselineCols] = useState(false);
   const [saveSnapshotOpen, setSaveSnapshotOpen] = useState(false);
   const [newSnapshotName, setNewSnapshotName] = useState("");
+
+  // Synchronized scrolling between DataGrid and GanttChart
+  const gridScrollRef = useRef(null);
+  const ganttScrollRef = useRef(null);
+  const activeScrollSource = useRef(null);
+
+  const handleGridScroll = useCallback((e) => {
+    if (activeScrollSource.current === "gantt") return;
+    activeScrollSource.current = "grid";
+    if (ganttScrollRef.current) {
+      ganttScrollRef.current.scrollTop = e.target.scrollTop;
+    }
+    requestAnimationFrame(() => {
+      activeScrollSource.current = null;
+    });
+  }, []);
+
+  const handleGanttScroll = useCallback((e) => {
+    if (activeScrollSource.current === "grid") return;
+    activeScrollSource.current = "gantt";
+    if (gridScrollRef.current) {
+      gridScrollRef.current.scrollTop = e.target.scrollTop;
+    }
+    requestAnimationFrame(() => {
+      activeScrollSource.current = null;
+    });
+  }, []);
 
   // Fetch Project from backend
   const fetchProject = useCallback(async () => {
@@ -186,6 +217,80 @@ export function Workspace() {
     [project]
   );
 
+  // Manual Reschedule Action (F9 / Button)
+  const handleReschedule = useCallback(async () => {
+    if (!project) return;
+    try {
+      setRecalculating(true);
+      const res = await api.post(`/projects/${project.id}/recalculate`, {
+        activities: project.activities,
+        calendar: project.calendar,
+      });
+
+      const calculated = res.data.activities || project.activities;
+      setProject((prev) => ({
+        ...prev,
+        activities: calculated,
+        schedule: {
+          project_start: res.data.project_start,
+          project_finish: res.data.project_finish,
+          duration_working_days: res.data.duration_working_days,
+          critical_count: res.data.critical_count,
+          has_cycle: res.data.has_cycle,
+        },
+      }));
+
+      // Push state to undo/redo history
+      const updatedHistory = history.slice(0, historyIdx + 1);
+      updatedHistory.push(calculated);
+      setHistory(updatedHistory);
+      setHistoryIdx(updatedHistory.length - 1);
+      setIsDirty(true);
+
+      // Refresh health summary
+      try {
+        const healthRes = await api.get(`/projects/${project.id}/health-audit`);
+        setHealthSummary(healthRes.data);
+      } catch {
+        // ignore
+      }
+
+      toast.success(
+        `Programme rescheduled: ${res.data.duration_working_days || 0} working days, ${res.data.critical_count || 0} critical tasks`
+      );
+    } catch (err) {
+      toast.error(errMsg(err));
+    } finally {
+      setRecalculating(false);
+    }
+  }, [project, history, historyIdx]);
+
+  // Global Keyboard Shortcuts (F9: Reschedule, Ctrl+S: Save, Ctrl+Z: Undo, Ctrl+Y: Redo)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "F9") {
+        e.preventDefault();
+        handleReschedule();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        handleSave();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        if (!e.shiftKey) {
+          e.preventDefault();
+          handleUndo();
+        } else {
+          e.preventDefault();
+          handleRedo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleReschedule]);
+
   // Modify activities and push to undo/redo history
   const handleActivitiesChange = (newActivities) => {
     const updatedHistory = history.slice(0, historyIdx + 1);
@@ -241,25 +346,74 @@ export function Workspace() {
     }
   };
 
-  const handleAddActivity = () => {
+  const handleOpenAddActivity = () => {
+    setSelectedActivityForEdit(null);
+    setActivityModalOpen(true);
+  };
+
+  const handleOpenEditActivity = (act) => {
+    setSelectedActivityForEdit(act);
+    setActivityModalOpen(true);
+  };
+
+  const handleSaveActivityModal = (savedAct) => {
     const current = project?.activities || [];
+    const isEditing = Boolean(selectedActivityForEdit);
+
+    if (isEditing) {
+      const oldId = selectedActivityForEdit.id || selectedActivityForEdit.activity_id;
+      const newId = savedAct.id || savedAct.activity_id;
+
+      const updated = current.map((a) => {
+        const curId = a.id || a.activity_id;
+        if (curId === oldId) {
+          return savedAct;
+        }
+        // If ID was renamed, update predecessor references in other tasks
+        if (oldId !== newId && a.predecessors) {
+          return {
+            ...a,
+            predecessors: a.predecessors.map((p) => {
+              const pId = p.id || p.activity_id;
+              if (pId === oldId) {
+                return { ...p, id: newId, activity_id: newId };
+              }
+              return p;
+            }),
+          };
+        }
+        return a;
+      });
+
+      handleActivitiesChange(updated);
+      toast.success(`Updated activity ${newId}`);
+    } else {
+      // Add new activity
+      const updated = [...current, savedAct];
+      handleActivitiesChange(updated);
+      toast.success(`Added activity ${savedAct.id || savedAct.activity_id}`);
+    }
+  };
+
+  const handleDuplicateActivity = (act) => {
+    const current = project?.activities || [];
+    const origId = act.id || act.activity_id;
     const newIndex = current.length + 1;
     const newId = `A${1000 + newIndex * 10}`;
-    const prevAct = current[current.length - 1];
 
-    const newAct = {
-      activity_id: newId,
+    const duplicated = {
+      ...act,
       id: newId,
-      description: "New Construction Task",
-      wbs_l1: prevAct?.wbs_l1 || prevAct?.stage || "General Works",
-      duration: 5,
-      predecessors: prevAct ? [{ id: prevAct.activity_id || prevAct.id, type: "FS", lag: 0 }] : [],
-      is_milestone: false,
-      type: "Task",
-      critical: false,
+      activity_id: newId,
+      name: `${act.name || act.description || "Task"} (Copy)`,
+      description: `${act.name || act.description || "Task"} (Copy)`,
+      predecessors: [{ id: origId, type: "FS", lag: 0 }],
+      percent_complete: 0,
+      progress: 0,
     };
 
-    handleActivitiesChange([...current, newAct]);
+    handleActivitiesChange([...current, duplicated]);
+    toast.success(`Duplicated task as ${newId}`);
   };
 
   const handleDeleteActivity = (actId) => {
@@ -500,14 +654,26 @@ export function Workspace() {
           </Button>
         </div>
 
-        {/* Right: Save, Quick Export */}
+        {/* Right: Reschedule, Save, Quick Export */}
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleReschedule}
+            disabled={recalculating}
+            className="h-8 text-xs gap-1.5 border-emerald-500/40 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-semibold"
+            title="Recalculate CPM network, dates, float, and critical path (Shortcut: F9)"
+          >
+            <RotateCcw className={`h-3.5 w-3.5 ${recalculating ? "animate-spin" : ""}`} />
+            <span>{recalculating ? "Rescheduling..." : "Reschedule (F9)"}</span>
+          </Button>
+
           <Button
             size="sm"
             onClick={handleSave}
             disabled={saving || !isDirty}
             className={`h-8 text-xs gap-1.5 ${
-              isDirty ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs" : ""
+              isDirty ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs font-semibold" : ""
             }`}
           >
             <Save className="h-3.5 w-3.5" />
@@ -653,10 +819,14 @@ export function Workspace() {
                 baselineComparison={baselineComparison}
                 showBaselineCols={showBaselineCols}
                 onActivitiesChange={handleActivitiesChange}
-                onAddActivity={handleAddActivity}
+                onAddActivity={handleOpenAddActivity}
+                onEditActivity={handleOpenEditActivity}
+                onDuplicateActivity={handleDuplicateActivity}
                 onDeleteActivity={handleDeleteActivity}
                 highlightedActivityId={highlightedActId}
                 onSelectActivity={setHighlightedActId}
+                scrollRef={gridScrollRef}
+                onScroll={handleGridScroll}
               />
             </div>
 
@@ -668,6 +838,8 @@ export function Workspace() {
                 baselineComparison={baselineComparison}
                 highlightedActivityId={highlightedActId}
                 onSelectActivity={setHighlightedActId}
+                scrollRef={ganttScrollRef}
+                onScroll={handleGanttScroll}
               />
             </div>
           </div>
@@ -700,6 +872,15 @@ export function Workspace() {
         onApplyChanges={(newActs) => {
           handleActivitiesChange(newActs);
         }}
+      />
+
+      {/* Activity Create & Edit Modal */}
+      <ActivityModal
+        open={activityModalOpen}
+        onOpenChange={setActivityModalOpen}
+        activity={selectedActivityForEdit}
+        allActivities={project?.activities || []}
+        onSave={handleSaveActivityModal}
       />
 
       {/* Save Baseline Snapshot Modal */}

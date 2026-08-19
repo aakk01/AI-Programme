@@ -427,14 +427,15 @@ async function startServer() {
     });
   });
 
-  app.put("/api/projects/:id", authMiddleware, (req: AuthRequest, res) => {
+  app.put(["/api/projects/:id", "/api/projects/:id/update"], authMiddleware, (req: AuthRequest, res) => {
     const project = db.projects.get(req.params.id);
     if (!project) {
       return res.status(404).json({ detail: "Project not found" });
     }
 
-    const { name, inputs, calendar, activities, assumptions, summary } = req.body;
+    const { name, title, inputs, calendar, activities, assumptions, summary } = req.body;
     if (name !== undefined) project.name = name;
+    if (title !== undefined) project.name = title;
     if (inputs !== undefined) project.inputs = inputs;
     if (calendar !== undefined) project.calendar = calendar;
     if (activities !== undefined) project.activities = activities;
@@ -444,6 +445,38 @@ async function startServer() {
 
     const pStart = project.inputs?.start_date || project.created_at.slice(0, 10);
     const cpm = calculate(project.activities || [], pStart, project.calendar);
+    project.activities = cpm.activities;
+
+    res.json({
+      ...project,
+      activities: cpm.activities,
+      project_start: cpm.project_start,
+      project_finish: cpm.project_finish,
+      duration_working_days: cpm.duration_working_days,
+      critical_count: cpm.critical_count,
+      has_cycle: cpm.has_cycle,
+    });
+  });
+
+  app.patch(["/api/projects/:id", "/api/projects/:id/update"], authMiddleware, (req: AuthRequest, res) => {
+    const project = db.projects.get(req.params.id);
+    if (!project) {
+      return res.status(404).json({ detail: "Project not found" });
+    }
+
+    const { name, title, inputs, calendar, activities, assumptions, summary } = req.body;
+    if (name !== undefined) project.name = name;
+    if (title !== undefined) project.name = title;
+    if (inputs !== undefined) project.inputs = inputs;
+    if (calendar !== undefined) project.calendar = calendar;
+    if (activities !== undefined) project.activities = activities;
+    if (assumptions !== undefined) project.assumptions = assumptions;
+    if (summary !== undefined) project.summary = summary;
+    project.updated_at = new Date().toISOString();
+
+    const pStart = project.inputs?.start_date || project.created_at.slice(0, 10);
+    const cpm = calculate(project.activities || [], pStart, project.calendar);
+    project.activities = cpm.activities;
 
     res.json({
       ...project,
@@ -535,6 +568,13 @@ async function startServer() {
     const project = db.projects.get(req.params.id);
     if (!project) {
       return res.status(404).json({ detail: "Project not found" });
+    }
+
+    if (req.body?.activities && Array.isArray(req.body.activities)) {
+      project.activities = req.body.activities;
+    }
+    if (req.body?.calendar) {
+      project.calendar = req.body.calendar;
     }
 
     const pStart = project.inputs?.start_date || project.created_at.slice(0, 10);

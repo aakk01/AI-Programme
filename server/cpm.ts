@@ -11,7 +11,7 @@ export const WEEK_PATTERNS: Record<string, Set<number>> = {
   "7-day": new Set([0, 1, 2, 3, 4, 5, 6]),
 };
 
-export const CONSTRAINTS = new Set(["", "SNET", "FNLT", "MSO"]);
+export const CONSTRAINTS = new Set(["", "SNET", "FNLT", "MSO", "MFO"]);
 
 export interface Link {
   id: string;
@@ -30,7 +30,7 @@ export interface Activity {
   duration?: number;
   predecessors?: Link[];
   successors?: string;
-  constraint_type?: "" | "SNET" | "FNLT" | "MSO";
+  constraint_type?: "" | "SNET" | "FNLT" | "MSO" | "MFO";
   constraint_date?: string | null;
   start?: string;
   finish?: string;

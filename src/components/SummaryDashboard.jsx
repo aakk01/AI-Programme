@@ -203,157 +203,201 @@ export function SummaryDashboard({
 
   return (
     <div
-      className={`bg-card/95 backdrop-blur-xs border-b transition-all duration-200 ${className}`}
+      className={`bg-slate-900/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-slate-800 transition-all duration-200 ${className}`}
       id="summary-dashboard"
     >
-      {/* Primary KPI Header Row */}
-      <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-        {/* Metric 1: Duration */}
-        <div className="flex items-center gap-3 pr-4 border-r border-border/70">
-          <div className="h-9 w-9 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-            <Clock className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Total Duration
-              </span>
-              {metrics.calendarDays > 0 && (
-                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.2 rounded font-mono">
-                  {metrics.calendarDays} cal days
+      {/* Primary Top KPI Bar */}
+      <div className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-slate-200">
+        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+          {/* KPI 1: Total Duration */}
+          <div className="flex items-center gap-2.5 pr-3 sm:pr-4 border-r border-slate-800/80">
+            <div className="h-8 w-8 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
+              <Clock className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 leading-none">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Total Duration
                 </span>
-              )}
+                {metrics.calendarDays > 0 && (
+                  <span className="text-[9px] text-slate-400 bg-slate-800/70 border border-slate-700/50 px-1 py-0.2 rounded font-mono">
+                    {metrics.calendarDays} cal d
+                  </span>
+                )}
+              </div>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-base sm:text-lg font-bold font-mono text-white tracking-tight">
+                  {metrics.workingDays || 142}
+                </span>
+                <span className="text-[11px] font-medium text-slate-400">Working Days</span>
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 leading-none mt-0.5">
+                <span>{formatDate(metrics.startDate)}</span>
+                <span className="text-slate-600">→</span>
+                <span className="text-emerald-400 font-medium">{formatDate(metrics.finishDate)}</span>
+              </div>
             </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-xl font-bold font-mono tracking-tight text-foreground">
-                {metrics.workingDays} <span className="text-xs font-normal text-muted-foreground">working days</span>
-              </span>
+          </div>
+
+          {/* KPI 2: Total Activities */}
+          <div className="flex items-center gap-2.5 pr-3 sm:pr-4 border-r border-slate-800/80">
+            <div className="h-8 w-8 rounded-md bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
+              <ListTodo className="h-4 w-4" />
             </div>
-            <div className="text-[11px] text-muted-foreground font-mono flex items-center gap-1">
-              <span>{formatDate(metrics.startDate)}</span>
-              <span>→</span>
-              <span className="text-primary font-semibold">{formatDate(metrics.finishDate)}</span>
+            <div>
+              <div className="flex items-center gap-1.5 leading-none">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Total Activities
+                </span>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                  {metrics.totalCount} items
+                </span>
+              </div>
+              <div className="flex items-baseline gap-1.5 mt-0.5">
+                <span className="text-base sm:text-lg font-bold font-mono text-white tracking-tight">
+                  {metrics.standardTaskCount}
+                </span>
+                <span className="text-[11px] font-normal text-slate-400">tasks</span>
+                <span className="text-slate-600">•</span>
+                <span className="text-xs font-semibold text-amber-400 font-mono">
+                  {metrics.milestoneCount}
+                </span>
+                <span className="text-[11px] font-normal text-slate-400">milestones</span>
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono leading-none mt-0.5 flex items-center gap-1">
+                <span className="text-emerald-400 font-semibold">{metrics.completedCount} done</span>
+                <span className="text-slate-600">|</span>
+                <span>{metrics.inProgressCount} in prog</span>
+              </div>
+            </div>
+          </div>
+
+          {/* KPI 3: Progress */}
+          <div className="flex items-center gap-2.5 pr-3 sm:pr-4 border-r border-slate-800/80 min-w-[190px]">
+            <div className="h-8 w-8 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <Percent className="h-4 w-4" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between gap-1 leading-none">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Progress
+                </span>
+                <span className="text-xs font-bold font-mono text-emerald-400">
+                  {metrics.durationWeightedPercent}%
+                </span>
+              </div>
+              {/* Sleek Progress Track */}
+              <div className="w-full bg-slate-800 rounded-full h-1.5 my-1 overflow-hidden border border-slate-700/50">
+                <div
+                  className="bg-emerald-500 h-full transition-all duration-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+                  style={{ width: `${Math.min(100, metrics.durationWeightedPercent)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono leading-none">
+                <span>
+                  Earned: <strong className="text-slate-200">{metrics.totalEarnedDuration}d</strong>
+                </span>
+                <span>{metrics.completedCount}/{metrics.totalCount} acts</span>
+              </div>
+            </div>
+          </div>
+
+          {/* KPI 4: Critical Path Ratio */}
+          <div className="flex items-center gap-2.5 pr-2">
+            <div className="h-8 w-8 rounded-md bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+              <AlertTriangle className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 leading-none">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Critical Path Ratio
+                </span>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+                </span>
+              </div>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-base sm:text-lg font-bold font-mono text-rose-400 tracking-tight">
+                  {metrics.criticalPercent}%
+                </span>
+                <span className="text-[11px] font-normal text-slate-400">
+                  ({metrics.criticalCount} Critical)
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-400 font-mono leading-none mt-0.5">
+                <button
+                  type="button"
+                  onClick={() => onFilterChange?.(activeFilter === "critical" ? "all" : "critical")}
+                  className="text-rose-400 hover:text-rose-300 underline underline-offset-2 transition-colors cursor-pointer"
+                >
+                  {activeFilter === "critical" ? "Show All Activities" : "Filter Critical Path Only"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Metric 2: Number of Tasks */}
-        <div className="flex items-center gap-3 pr-4 border-r border-border/70">
-          <div className="h-9 w-9 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-            <ListTodo className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Schedule Activities
-              </span>
-              <Badge variant="outline" className="text-[10px] py-0 px-1 font-mono">
-                {metrics.totalCount} Total
-              </Badge>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-xl font-bold font-mono tracking-tight text-foreground">
-                {metrics.standardTaskCount}{" "}
-                <span className="text-xs font-normal text-muted-foreground">tasks</span>
-              </span>
-              <span className="text-xs text-muted-foreground">•</span>
-              <span className="text-sm font-semibold text-amber-600 dark:text-amber-400 font-mono">
-                {metrics.milestoneCount} <span className="text-xs font-normal text-muted-foreground">milestones</span>
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px]">
-              <button
-                type="button"
-                onClick={() => onFilterChange?.(activeFilter === "critical" ? "all" : "critical")}
-                className={`flex items-center gap-1 font-medium transition-colors ${
-                  activeFilter === "critical"
-                    ? "text-rose-600 dark:text-rose-400 underline underline-offset-2"
-                    : "text-muted-foreground hover:text-rose-600"
-                }`}
-                title="Filter critical path activities"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-rose-500 inline-block animate-pulse" />
-                <strong className="text-rose-600 dark:text-rose-400 font-mono">{metrics.criticalCount}</strong> Critical ({metrics.criticalPercent}%)
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 3: Percentage of Completion */}
-        <div className="flex items-center gap-3 pr-4 border-r border-border/70 flex-1 min-w-[220px]">
-          <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-            <Percent className="h-5 w-5" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Completion Progress
-              </span>
-              <span className="text-xs font-bold font-mono text-emerald-600 dark:text-emerald-400">
-                {metrics.durationWeightedPercent}%
-              </span>
-            </div>
-            {/* Visual Progress Bar */}
-            <div className="w-full bg-muted/80 rounded-full h-2.5 my-1 overflow-hidden flex">
-              <div
-                className="bg-emerald-500 h-full transition-all duration-500 rounded-full"
-                style={{ width: `${Math.min(100, metrics.durationWeightedPercent)}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
-              <span>
-                Earned: <strong className="text-foreground">{metrics.totalEarnedDuration}d</strong> / {metrics.totalPlannedDuration}d
-              </span>
-              <span>
-                {metrics.completedCount}/{metrics.totalCount} completed
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Filter Buttons & Expand Toggle */}
-        <div className="flex items-center gap-2">
-          {/* Status Breakdown Pills */}
-          <div className="hidden sm:flex items-center gap-1 text-xs">
-            <Button
-              variant={activeFilter === "completed" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => onFilterChange?.(activeFilter === "completed" ? "all" : "completed")}
-              className="h-7 px-2 text-xs gap-1 text-emerald-600 dark:text-emerald-400"
+        {/* Right side: Quick Status Filters & Analytics Toggle */}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <div className="hidden xl:flex items-center gap-1 bg-slate-800/60 p-0.5 rounded-md border border-slate-700/60 text-xs">
+            <button
+              type="button"
+              onClick={() => onFilterChange?.("all")}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                activeFilter === "all"
+                  ? "bg-slate-700 text-white shadow-xs"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
             >
-              <CheckCircle2 className="h-3 w-3" />
-              <span>{metrics.completedCount} Done</span>
-            </Button>
-            <Button
-              variant={activeFilter === "in_progress" ? "secondary" : "ghost"}
-              size="sm"
+              All ({metrics.totalCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => onFilterChange?.(activeFilter === "critical" ? "all" : "critical")}
+              className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                activeFilter === "critical"
+                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                  : "text-slate-400 hover:text-rose-400"
+              }`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+              Critical ({metrics.criticalCount})
+            </button>
+            <button
+              type="button"
               onClick={() => onFilterChange?.(activeFilter === "in_progress" ? "all" : "in_progress")}
-              className="h-7 px-2 text-xs gap-1 text-blue-600 dark:text-blue-400"
+              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                activeFilter === "in_progress"
+                  ? "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                  : "text-slate-400 hover:text-blue-400"
+              }`}
             >
-              <Hourglass className="h-3 w-3" />
-              <span>{metrics.inProgressCount} In-Prog</span>
-            </Button>
-            <Button
-              variant={activeFilter === "not_started" ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => onFilterChange?.(activeFilter === "not_started" ? "all" : "not_started")}
-              className="h-7 px-2 text-xs gap-1 text-muted-foreground"
+              Active ({metrics.inProgressCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => onFilterChange?.(activeFilter === "completed" ? "all" : "completed")}
+              className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                activeFilter === "completed"
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                  : "text-slate-400 hover:text-emerald-400"
+              }`}
             >
-              <CircleDot className="h-3 w-3" />
-              <span>{metrics.notStartedCount} Pending</span>
-            </Button>
+              Done ({metrics.completedCount})
+            </button>
           </div>
 
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="h-8 text-xs gap-1.5"
-            title="Toggle Detailed Schedule Analytics"
+            className="h-7 text-xs px-2 text-slate-300 hover:text-white hover:bg-slate-800/80 border border-slate-700/60"
+            title="Toggle Detailed Work Package Breakdown"
           >
-            <Sliders className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">{isExpanded ? "Collapse Analytics" : "Stage Breakdown"}</span>
-            {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            <Sliders className="h-3 w-3 mr-1 text-emerald-400" />
+            <span className="hidden sm:inline">{isExpanded ? "Hide Breakdown" : "WBS Stages"}</span>
+            {isExpanded ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />}
           </Button>
         </div>
       </div>

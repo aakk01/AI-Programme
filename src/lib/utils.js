@@ -5,6 +5,16 @@ export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
 
+export function parseDate(dateStr) {
+  if (!dateStr) return null;
+  try {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+
 export function formatDate(dateStr) {
   if (!dateStr) return "-";
   try {
