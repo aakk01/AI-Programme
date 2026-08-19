@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 6 — tested Version Snapshots + Baseline Slippage end-to-end. Backend: 7/7 snapshot tests pass (POST/GET/restore/compare + legacy /versions). MSP/Asta/XER export regression (10/10) still green — Asta XSD ordering bug flagged in iter5 has been fixed. Frontend: full happy path passes — Snapshots (N) dropdown, save-snapshot modal with count increment, baseline selector with 19 options, 73 baseline bars rendered in Gantt, BL Start/BL Finish toggle on/off, Manage snapshots dialog with per-row Set-as-baseline + Restore buttons, calendar/variance/AI drawer regressions intact. Old standalone Snapshot / Versions toolbar buttons are gone as required.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_snapshots_baseline.py",
+    "/app/backend/tests/test_msp_export.py",
+    "/app/test_reports/pytest/iter6_snapshots.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Workspace.jsx is now ~900 lines with 5 dialogs, several dropdowns and lots of local state. Consider extracting SnapshotsMenu, SaveSnapshotDialog and SnapshotsListDialog into their own components — currently violates the >700-line guideline and mixes toolbar rendering with snapshot business logic.",
+    "GanttChart.jsx workingDayOffset caps at 20000 iterations (per problem statement) — silent cap; if a baseline finish is beyond ~55 years the baseline bar would render at the wrong offset with no warning. Prefer computing offset from a working-day index built once from projectStart, or at least console.warn on cap hit.",
+    "server.py _save_snapshot writes to db.versions but the response models are inconsistent — legacy POST /versions returns {id,version,label,created_at} while POST /snapshots returns the richer summary with activity_count. Fine for BC, but document this in the endpoint docstrings.",
+    "compare endpoint reruns full CPM on the baseline project every call — for large programmes with many baseline switches this could be slow. Consider caching baseline schedule keyed by snapshot_id.",
+    "_diff_days silently returns None on missing/invalid dates; the frontend treats None as 'no data' but the DataGrid variance column colouring logic should be re-checked so None does not render as green/zero variance."
+  ],
+  "updated_files": ["/app/backend/tests/test_snapshots_baseline.py"],
+  "success_rate": {"backend": "100% (7/7 snapshot + 10/10 export regression)", "frontend": "100% (all snapshot/baseline UI flows)"},
+  "test_credentials": "planner@test.com / Test1234 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Used existing project ed60c71a-2483-4e54-b062-e9414efe35ce. Backend tests take a TEST_restorepoint snapshot on setup and restore it on teardown so the shared project state is preserved. Several TEST_* labelled snapshots remain in the versions collection (harmless — snapshot count grew from 15→18).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Snapshots + baseline slippage feature is fully working end-to-end. Backend tests live in /app/backend/tests/test_snapshots_baseline.py and use a restore-point teardown pattern to keep the shared project stable. Frontend flow verified via Playwright: snapshots-menu → save-snapshot-menu / snapshot-name-input / save-snapshot-confirm; baseline-selector picks snapshot → 73 gantt-baseline-* rects render; toggle-baseline-cols adds/removes BL Start / BL Finish grid columns; manage-snapshots-menu opens snapshots-list with set-baseline-{id} + restore-{id} rows. Post-login lands on '/' (not '/dashboard') — worth remembering for future scripts.",
+  "rca of the issue": "N/A — no defects found in iteration 6 scope."
+}

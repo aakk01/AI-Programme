@@ -1,0 +1,59 @@
+{
+  "summary": "Iteration 4 full backend+frontend pass. Added 17 new pytest tests in /app/backend/tests/test_asta_and_xer_import.py covering (a) Asta Powerproject XML export (root <Project>, Text1 ExtendedAttribute FieldID 188743731, calendar 7 WeekDays + UK holiday Exceptions, OutlineLevel 1/2/3 WBS hierarchy, PredecessorLink integrity - every PredecessorUID resolves, count matches sum of predecessors on non-summary tasks, Milestone=1, ConstraintType=4 + ConstraintDate for SNET) and (b) POST /api/projects/import/xer end-to-end and pure-python via xer_import.import_xer (Riverside Tower round-trip preserves 73 activities / 103 links / 8 milestones / project_finish 2029-03-23 / 650 wd; import_stats + Import assumption + 5-day calendar + holidays recovered; 400 for non-XER text with 'does not look like a P6 XER file'; 401/403 for unauthenticated; TYPE_MAP covers Task/Milestone/Summary/Rsrc fallback; PRED_MAP covers FS/SS/FF/SF; CSTR_MAP covers CS_MSO/CS_MSOB->SNET, CS_MEO/CS_MEOB/CS_MANDFIN->FNLT, CS_MANDSTART->MSO; durations hours/8; WBS_L1/L2 populated with dotted wbs_code; holidays parsed from 8-digit YYYYMMDD tokens). Full backend suite (excluding AI per brief): 51/51 pytest green in 5.4s. Frontend: Dashboard shows import-xer-button + hidden xer-file-input (type=file accept='.xer,text/plain'); uploaded an XER (exported from Riverside Tower) via set_input_files and it created a new project, showed success toast, navigated to /project/{newId}, rendered 73-activity grid + Gantt with 5-day calendar, and the Assumptions dialog listed the Import entry. Export dropdown lists all five items (CSV, JSON, MS Project XML (MSP / Asta), Asta Powerproject XML [data-testid export-asta], Primavera P6 XER); export-asta triggered a Riverside_Tower-asta.xml download (97,515 bytes, root <Project> confirmed). Regression on seeded Riverside Tower v8: title/undo/redo/stage-filter/calendar/variance/assumptions/versions (8 snapshots)/snapshot/export/save/toggle-chat/day-week-month zoom buttons all present and working; calendar/variance/versions dialogs open; theme-toggle flips html.className '' <-> 'dark'. Cleaned up my imported project + one leftover Riverside Tower v1 from a prior iteration so the dashboard now shows only the seeded v8 (73 activities, 650 wd, 2026-09-01 -> 2029-03-23, 20 critical). Fixed one blocker: Dashboard.jsx had an extra </div> at line 134 causing 'Expected corresponding JSX closing tag for <main>' - frontend was NOT compiling on arrival. Skills loaded: ai-testing-core (AI features not-in-scope-this-iteration per brief; generate/refine unchanged, EMERGENT_LLM_KEY not exercised).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "pages/Dashboard.jsx",
+        "issue": "Extra closing </div> at line 134 broke the JSX parse ('Expected corresponding JSX closing tag for <main>'), so the frontend build failed on iteration-4 arrival and the whole app was unreachable. Fixed in-place (removed the duplicate </div>). Compile is now clean.",
+        "selector": "src/pages/Dashboard.jsx line 134 (between the header <div>...</div> row and the {loading ? ...} block)",
+        "priority": "CRITICAL (fixed)"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Assumptions / Versions dialogs",
+        "issues": [
+          "React console warning: 'Missing `Description` or `aria-describedby={undefined}` for {DialogContent}'. Non-blocking accessibility warning from shadcn/Radix Dialog. Adding <DialogDescription>... or aria-describedby on <DialogContent> silences it."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_asta_and_xer_import.py",
+    "/app/backend/tests/",
+    "/app/test_reports/pytest/iter4_full.xml",
+    "/app/test_reports/pytest/iter4_baseline.xml"
+  ],
+  "action_items": [
+    "Verify the Dashboard.jsx fix (extra </div> removed) is preserved on the next code review — this was the only file I modified.",
+    "(Low, cosmetic) Add <DialogDescription> to Assumptions / Versions / Calendar / Variance dialogs to silence the shadcn/Radix aria-describedby warning."
+  ],
+  "critical_code_review_comments": [
+    "Dashboard.jsx: the duplicated </div> at line 134 shipped in the diff would have blocked any preview environment from loading at all. Recommend running the compiler locally on iteration-open (fast-fail 'webpack compiled with 2 errors' before agent testing).",
+    "xer_import._hours_to_days uses int(round(x)) which turns lag_hr_cnt = -8 into -1 day; that already matches the FS/SS/FF/SF round-trip expectation in the review request. Negative lag on SF is preserved as -1 day in the mapping test.",
+    "server.import_xer catches every Exception from xer_import.import_xer() and wraps as 'Could not read XER file: ...' HTTP 400. That path works for the 'does not look like a P6 XER file' text file, but any Pydantic Activity validation error will also collapse to that generic 'Could not read XER file' message instead of the more specific ValueError message. Consider re-raising ValueError with detail=str(e) directly and 500-ing on other exceptions.",
+    "Assumption Import entry uses hard-coded copy 'Imported from Primavera P6 XER'. If you add other importer formats (Asta PP native, MSP MPP) later, split this into a shared helper.",
+    "exporters.to_asta_xml builds L1/L2 summary rows even when a stage has only one L2 group (e.g. everything under 'Programme/General' -> a 2-level summary of a 1-branch tree). That's harmless for Asta but produces slightly noisy WBS numbers; consider collapsing single-child summaries for cleaner outlines.",
+    "The Asta ExtendedAttribute is written per-task on ALL tasks including L1 and L2 summary rows. Asta typically only expects the WBS code on activities. Currently harmless; MSP-compatible clients ignore it on summaries.",
+    "Dashboard.jsx import route uses api.post('/projects/import/xer', body) where body is a FormData - relies on axios auto-omitting the JSON Content-Type. Works but worth adding an explicit config: `{ headers: { 'Content-Type': 'multipart/form-data' } }` for clarity / defensive coding."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Dashboard.jsx (removed the extra </div> at line 134 - CRITICAL fix)",
+    "/app/backend/tests/test_asta_and_xer_import.py (NEW - 17 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (51/51 pytest, AI suite excluded per brief)",
+    "frontend": "100% (Dashboard XER import + navigate + Assumptions dialog + all 5 export items + Asta download; Workspace regression suite; theme toggle; dialogs)"
+  },
+  "test_credentials": "planner@test.com / Test1234 (verified via /app/memory/test_credentials.md)",
+  "seed_data_creation": "Cleaned up: (a) one imported project I created (id c42b81bf... - post-test DELETE 200); (b) one Riverside Tower v1 UNCLASSIFIED leftover from a previous testing agent (id 39008802... - DELETE 200). Dashboard now shows only the original seeded Riverside Tower v8 (73 activities, 650 wd, 2026-09-01 -> 2029-03-23, 20 critical) as required.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 4 introduced /api/projects/import/xer (multipart 'file') and /api/projects/{id}/export/asta. Both are fully covered by /app/backend/tests/test_asta_and_xer_import.py (17 tests, ~1.7s). The synthetic XER fixture inside that file (_mk_synthetic_xer) exercises every TYPE_MAP / PRED_MAP / CSTR_MAP branch without any HTTP round-trip - reuse it for future XER schema changes. IMPORTANT for multipart tests: the shared 'api' fixture in conftest.py sets Content-Type: application/json as a session header, which BREAKS multipart uploads (server returns 422 'Field required'). Use a fresh `requests.post(..., files=..., headers={Authorization only})` instead of the api session. Dashboard.jsx had an extra </div> at line 134 blocking the whole frontend build - fixed by this iteration. Frontend testids new this round: import-xer-button, xer-file-input, export-asta (dropdown item). Backend seeded project ed60c71a-2483-4e54-b062-e9414efe35ce (Riverside Tower v8) is intact; its exact round-trip stats are 73 activities / 103 links / 8 milestones / project_finish 2029-03-23 / duration 650 wd - the round-trip XER re-import test asserts these exact numbers so any future schedule regression will trip it.",
+  "rca_of_the_issue": "Blocker: Dashboard.jsx line 134 shipped with a spurious </div> after 'New programme' Button - closes the flex wrap header container twice, leaving <main> with no matching close. Babel parser reported 'Expected corresponding JSX closing tag for <main>. (134:8)' and webpack failed to compile. Frontend supervisor kept the dev server alive but every page render fell through to a compile-error overlay. Fix: delete the extra </div>. Preview loads clean afterwards (Compiled successfully / no errors). Root cause seems to be a manual insert of the Import XER button + hidden file input that duplicated the surrounding container close. Suggest adding a webpack build to the CI/agent boot script so this fails fast rather than turning into a 'blank screen' testing symptom."
+}

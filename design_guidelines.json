@@ -1,0 +1,106 @@
+{
+  "project_type": "saas_app",
+  "theme": {
+    "mode": "both",
+    "description": "Clean, engineering-grade interface inspired by Linear and Primavera P6. High density, low noise, professional tool."
+  },
+  "typography": {
+    "strategy": "Swiss Brutalist High-Contrast",
+    "headings": {
+      "font": "Chivo",
+      "weights": ["light", "regular", "bold"],
+      "usage": "Use tight letter spacing (tracking-tight) and moderate scale. Maximum text-4xl for main headings to save space.",
+      "banned": ["Inter", "Roboto", "Open Sans", "Lato"]
+    },
+    "body": {
+      "font": "IBM Plex Sans",
+      "weights": ["regular", "medium"],
+      "usage": "Use for UI elements, labels, and general body copy."
+    },
+    "data_grid": {
+      "font": "IBM Plex Mono",
+      "weights": ["regular", "medium"],
+      "usage": "MANDATORY for all numerical data, tabular data, WBS codes, and dates to ensure vertical alignment."
+    }
+  },
+  "colors": {
+    "archetype": "SWISS & HIGH-CONTRAST",
+    "light_mode": {
+      "background": "#FFFFFF",
+      "surface": "#F7F7F8",
+      "border": "#E5E5E5",
+      "text_primary": "#0A0A0A",
+      "text_secondary": "#525252"
+    },
+    "dark_mode": {
+      "background": "#0A0A0A",
+      "surface": "#141414",
+      "border": "#262626",
+      "text_primary": "#FAFAFA",
+      "text_secondary": "#A3A3A3"
+    },
+    "semantic": {
+      "gantt_standard": "#0066FF",
+      "gantt_critical_path": "#FF3B30",
+      "gantt_milestone": "#F5A623",
+      "primary_cta": "#0A0A0A",
+      "primary_cta_dark": "#FFFFFF"
+    },
+    "rules": [
+      "Avoid large colorful gradients.",
+      "Use strict grayscale for structural UI.",
+      "Gantt colors (Blue/Red/Orange) should be highly saturated to stand out against the monochrome interface.",
+      "Forbidden colors: Teal Green (#1B93A4)."
+    ]
+  },
+  "layouts": {
+    "core_structure": "Split-view layout. Highly modular, resizable panels.",
+    "workspace": {
+      "split_strategy": "Horizontal split (Data Grid on top, Gantt on bottom) or Vertical split (Grid on left, Gantt on right). MUST be resizable using a drag handle.",
+      "ai_drawer": "Right-side floating drawer or collapsible panel for AI Chat Refinement."
+    },
+    "spacing": "High Density Grid (Mode B). Compact spacing (p-1 to p-4) in the grid and timeline to maximize visible data. Strict alignment.",
+    "surfaces": "Grid Borders: Expose the skeleton. Data tables and panels should use 1px subtle borders (border-border/40). No shadows or soft UI. Flat solid backgrounds."
+  },
+  "components": {
+    "instructions_to_main_agent": [
+      "Use pure HTML + Tailwind for structural layouts like the resizable split-pane.",
+      "Use Shadcn UI for standard interactive components (Dropdowns, Tabs, Inputs, Checkboxes, Dialogs, Selects).",
+      "Use Shadcn Table or TanStack Table for the Editable Data Grid. It MUST support dense spreadsheet-style layout.",
+      "Gantt Chart: Build an interactive SVG or Canvas Gantt Chart. Standard bars in blue, critical path in red, milestones as diamonds.",
+      "Use `react-resizable-panels` for the split view.",
+      "Never use native <input> or <select>. Always use Shadcn components.",
+      "Do NOT use HTML-based components for advanced user interactions.",
+      "DO NOT use transparent background in header, overlays, or any surface that has content under it (e.g., Dropdown)."
+    ]
+  },
+  "visual_enhancers": {
+    "borders": "1px solid strokes for input fields and cards. Sharp or slightly rounded edges (max rounded-sm or 4px).",
+    "motion": "Minimal. Focus on performance. Hover states for table rows (slight background tint). Smooth transitions for the AI right drawer."
+  },
+  "image_urls": [
+    {
+      "url": "https://images.pexels.com/photos/9741345/pexels-photo-9741345.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "category": "auth_background",
+      "description": "Abstract black and white image of a modern architectural grid pattern. Perfect for a clean, engineering-grade Auth screen background."
+    },
+    {
+      "url": "https://images.unsplash.com/photo-1493397212122-2b85dda8106b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBhcmNoaXRlY3R1cmUlMjBncmlkJTIwYWJzdHJhY3R8ZW58MHx8fHwxNzgyMzM0MDkzfDA&ixlib=rb-4.1.0&q=85",
+      "category": "empty_state",
+      "description": "Modern architecture grid abstract. Use as a subtle placeholder or empty state graphic for the dashboard."
+    }
+  ],
+  "accessibility": {
+    "contrast": "Ensure text meets APCA standards. Normal text min 4.5:1, Large text min 3:1.",
+    "focus": "All interactive elements MUST have a visible focus ring (focus:ring-2 focus:ring-blue-500).",
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., data-testid='create-project-button')."
+  },
+  "universal_guidelines_for_main_agent": [
+    "Prioritize performance and density over flashy animations for this professional tool.",
+    "Do not apply universal transition (`transition: all`). Use specific transitions.",
+    "Never center align the app container. Left-align dense data for readability.",
+    "Use Phosphor Icons or Lucide React for crisp, professional iconography.",
+    "Use `sonner` for toast notifications.",
+    "Ensure dark mode and light mode are supported completely, avoiding unreadable dark text on dark backgrounds."
+  ]
+}

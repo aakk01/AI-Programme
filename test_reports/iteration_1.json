@@ -1,0 +1,53 @@
+{
+  "summary": "Full backend + frontend test pass. 22/22 backend tests pass across auth, projects CRUD, CPM correctness (FS/SS/FF/SF, positive/negative lags, milestone dur=0, critical path, cycle detection), exports (CSV/JSON/MSP XML with PredecessorLink verified), versions (snapshot/list/restore), AI generation end-to-end and AI refinement+apply-changes. Frontend E2E on preview URL: login->dashboard->Riverside Tower->73-row data grid rendered->double-click Duration edit on A1010 (30->55) recalculated float/dates and Gantt updated; invalid predecessor 'INVALID_$$$_syntax' triggered 'Invalid link syntax' toast; valid 'A1000FS+5d' accepted; add activity 73->74 and delete 74->73; Save persisted with 'Programme saved' toast; zoom day/week/month, milestone diamonds & gantt bars visible; assumptions dialog listed 14 items; versions dialog opened; Export dropdown showed CSV/JSON/XML; theme toggle light<->dark persisted across reload; stage filter reduced 73 rows -> 13; logout redirects to /login; protected '/' route redirects to /login when logged out.\n\nAI features:\n- Baseline AI generation (Claude Sonnet 4.6) - pass - evidence: /api/projects/{id}/generate returned {status:'running'}, /generation-status polled to 'done', activities returned in 45-90 range with assumptions, has_cycle=false (pytest 143s). Command: pytest tests/test_ai.py::test_generation_end_to_end.\n- AI refinement (Claude Sonnet 4.6) - pass - evidence: /refine returned explanation + non-empty changes list; /apply-changes rescheduled with has_cycle=false. Command: pytest tests/test_ai.py::test_refine_and_apply.\n\nSkills loaded: ai-testing-core, ai-testing-llm.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/projects/{id}/generate", "issue": "Generation hits Emergent 429 CONCURRENCY_REQUEST_LIMIT under any concurrency; single tenant plan requires strictly serialized AI calls. Confirmed successful when run alone (~2-3 min)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "code_review": {
+    "critical_code_review_comments": [
+      "AuthPage triggers React warning: 'Cannot update a component (BrowserRouter) while rendering a different component (AuthPage)'. Likely calls navigate()/state update during render; wrap in useEffect. Non-blocking but should be fixed.",
+      "server.py:281 kicks off asyncio.create_task(_run_generation) but the running-status flag has a race: if the pod restarts mid-generation the status stays 'running' forever. Consider a heartbeat/timestamp so stale 'running' can recover.",
+      "cpm.py:141 free-float slack calc uses sc['ef'] before backward pass values are computed for start slacks; algorithm looks correct given ordering, but add unit tests for FF/SF free-float edge cases (not covered here).",
+      "server.py:280 duplicate call to _run_generation cannot be cancelled if user closes tab; consider a per-project cancellation token.",
+      "exporters.to_msproject_xml: LagFormat=7 emitted alongside DurationFormat=7; MSP accepts, but Duration is written as PT{dur*8}H0M0S without weekend calendar handling in the value itself (calendar section covers it). Acceptable.",
+      "Workspace.jsx recalc() awaits recalculate on every keystroke commit — fine for correctness but chatty; not a bug."
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_auth.py",
+    "/app/backend/tests/test_projects_crud.py",
+    "/app/backend/tests/test_cpm.py",
+    "/app/backend/tests/test_exports_versions.py",
+    "/app/backend/tests/test_ai.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: fix React setState-in-render warning on AuthPage (move navigate() into useEffect).",
+    "Optional: add stale-'running' recovery for generation status if backend restarts mid-run."
+  ],
+  "updated_files": [
+    "/app/backend/tests/__init__.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/test_auth.py",
+    "/app/backend/tests/test_projects_crud.py",
+    "/app/backend/tests/test_cpm.py",
+    "/app/backend/tests/test_exports_versions.py",
+    "/app/backend/tests/test_ai.py"
+  ],
+  "success_rate": {"backend": "100% (22/22 pytest)", "frontend": "100% (all E2E flows pass)"},
+  "test_credentials": "planner@test.com / Test1234 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Used existing seeded project id ed60c71a-2483-4e54-b062-e9414efe35ce (Riverside Tower, 73 activities). Fresh AI-generated test project auto-cleaned up. Signup created transient test user emails prefixed test_signup_ (backend lowercases email on signup so uppercase TEST_ prefix would fail equality assertions).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend generation is single-concurrency (Emergent LLM 429 CONCURRENCY_REQUEST_LIMIT). Do NOT run test_ai.py under -n>1; the pytest.ini uses loadscope so keep AI tests in a single module (already true). Use -p no:xdist -o addopts='' for AI runs. Generation deadline set to 420s to survive 429 retries. Existing project id ed60c71a-2483-4e54-b062-e9414efe35ce is the seed; grid cells require double-click for edit; milestone rows have duration forced to 0 by CPM so pick a Task row (e.g. A1010) for duration edit tests.",
+  "rca_of_the_issue": "N/A — no failing scenarios after fixes. The initial signup test assertion failed because backend lowercases email (server.py:135), corrected the test. Initial AI generation timeout was due to Emergent 429 concurrent_request_limit backoff retries pushing runtime past 4 min; increased poll deadline to 7 min and it completes."
+}

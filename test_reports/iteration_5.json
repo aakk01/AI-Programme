@@ -1,0 +1,38 @@
+{
+  "summary": "Regression tested export endpoints after MSP XSD-ordering fix. 9/10 tests pass. MSP XML fix verified end-to-end (durations non-zero, XSD ordering intact, Manual present, predecessors emitted, milestones correctly PT0H0M0S). CSV/JSON/XER all pass. Asta XML has a residual XSD-ordering bug: <TotalSlack>/<FreeSlack>/<Critical> are still emitted in the wrong order — Critical must come right after Summary, and FreeSlack must precede TotalSlack (per MSP XSD). Asta was updated for most elements but this block was missed in the fix. This is exactly the class of bug that made MS Project silently drop <Duration> originally, so it should be corrected in to_asta_xml before shipping.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/projects/{id}/export/asta",
+        "issue": "MSP XSD ordering violation in to_asta_xml (exporters.py lines 164-168, 193). extra_meta emits <TotalSlack><FreeSlack><Critical> in that order and is placed after <Summary>. Per MSP XSD, Critical must come immediately after Summary, and FreeSlack must precede TotalSlack. Asta Powerproject / MS Project may silently drop fields (same failure mode as the original Duration bug). Fix: reorder to <Critical> before <IsSubproject>, and emit <FreeSlack> before <TotalSlack> in the later slot (matching how to_msproject_xml already does it).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_msp_export.py",
+    "/app/test_reports/pytest/iter5_msp_export.xml"
+  ],
+  "action_items": [
+    "Fix XSD element ordering in exporters.to_asta_xml: emit <Critical> right after <Summary>, and <FreeSlack> before <TotalSlack> (currently reversed). Same class of bug as the original MSP Duration=0 issue.",
+    "After fix, re-run: pytest /app/backend/tests/test_msp_export.py -v"
+  ],
+  "critical_code_review_comments": [
+    "to_asta_xml still has an XSD-ordering flaw around slack/critical elements — the same category of bug that was just fixed for Duration. Recommend abstracting the task-element renderer into one helper shared by both to_msproject_xml and to_asta_xml to prevent divergence.",
+    "exporters.py is ~500 lines and contains three separate exporters — consider splitting into exporters/msp.py, exporters/asta.py, exporters/xer.py, exporters/csv.py.",
+    "Duplicate calendar/WeekDay XML building logic between to_asta_xml (via _calendar_xml) and to_msproject_xml (inline) — DRY violation.",
+    "In to_msproject_xml <Notes> is not emitted whereas to_asta_xml emits it — inconsistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_msp_export.py (new)"
+  ],
+  "success_rate": {"backend": "90%", "frontend": "n/a (skipped per request)"},
+  "test_credentials": "planner@test.com / Test1234 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created a TEST_export_* project via POST /api/projects and seeded 4 activities (3 Tasks 10/15/20 days + 1 Milestone with predecessor chain) via PUT /api/projects/{id}/activities. Project is deleted in the module teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Test file /app/backend/tests/test_msp_export.py covers MSP XML, Asta XML, CSV, JSON, XER export regressions including MSP XSD element ordering, non-zero Duration for non-milestone tasks (PT80H/PT120H/PT160H for 10/15/20 day tasks), Milestone Duration=PT0H0M0S, <Manual> presence, and PredecessorLink emissions. Only Asta ordering assertion fails currently — see rca.",
+  "rca of the issue": "In /app/backend/exporters.py to_asta_xml, extra_meta is built as `<TotalSlack>..</TotalSlack><FreeSlack>..</FreeSlack><Critical>..</Critical>` and injected right after <Summary>. Correct MSP XSD order requires Critical→FreeSlack→TotalSlack. Mitigation: change lines 164-168 to emit `<Critical>` first (as its own element positioned right after `<Summary>` on line 192) and then later emit `<FreeSlack>` before `<TotalSlack>` (matching to_msproject_xml lines 300-303). Reproduce with: pytest /app/backend/tests/test_msp_export.py::TestAstaXml::test_summary_hierarchy_and_leaf_durations -v"
+}
